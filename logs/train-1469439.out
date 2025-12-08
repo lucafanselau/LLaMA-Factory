@@ -1,0 +1,29 @@
+Starting training job: train-qwen3_vl_2b_OVIS_single_image_multi_image_single_t
+Job ID: 1469439
+Allocated GPUs: 
+Host: node15
+================================
+Running training with config: training_configs/qwen3_vl_2b_OVIS_single_image_multi_image_single_turn_multi_image_multi_turn_lora.yaml
+================================
+Traceback (most recent call last):
+  File "/home/stud/falu/code/LLaMA-Factory/src/train.py", line 28, in <module>
+    main()
+  File "/home/stud/falu/code/LLaMA-Factory/src/train.py", line 19, in main
+    run_exp()
+  File "/home/stud/falu/code/LLaMA-Factory/src/llamafactory/train/tuner.py", line 132, in run_exp
+    _training_function(config={"args": args, "callbacks": callbacks})
+  File "/home/stud/falu/code/LLaMA-Factory/src/llamafactory/train/tuner.py", line 55, in _training_function
+    model_args, data_args, training_args, finetuning_args, generating_args = get_train_args(args)
+                                                                             ^^^^^^^^^^^^^^^^^^^^
+  File "/home/stud/falu/code/LLaMA-Factory/src/llamafactory/hparams/parser.py", line 257, in get_train_args
+    model_args, data_args, training_args, finetuning_args, generating_args = _parse_train_args(args)
+                                                                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/stud/falu/code/LLaMA-Factory/src/llamafactory/hparams/parser.py", line 211, in _parse_train_args
+    return _parse_args(parser, args, allow_extra_keys=allow_extra_keys)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/stud/falu/code/LLaMA-Factory/src/llamafactory/hparams/parser.py", line 90, in _parse_args
+    return parser.parse_dict(args, allow_extra_keys=allow_extra_keys)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/stud/falu/code/LLaMA-Factory/.venv/lib/python3.11/site-packages/transformers/hf_argparser.py", line 383, in parse_dict
+    raise ValueError(f"Some keys are not used by the HfArgumentParser: {sorted(unused_keys)}")
+ValueError: Some keys are not used by the HfArgumentParser: ['pin_memory']

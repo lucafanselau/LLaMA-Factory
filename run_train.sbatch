@@ -1,0 +1,9 @@
+#!/bin/bash -l
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --nodelist=node[15-20]
+#SBATCH --gres=gpu:4,VRAM:48G
+#SBATCH --mem=64G
+#SBATCH --time=3-00:00:00
+#SBATCH --output=/usr/stud/falu/code/vis/logs/inference-%j.out
+#SBATCH --error=/usr/stud/falu/code/vis/logs/inference-%j.out
