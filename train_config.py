@@ -8,14 +8,14 @@ MODEL_REGISTRY = {
         "model_name_or_path": "Qwen/Qwen3-VL-2B-Instruct",
         "template": "qwen3_vl_nothink",
         "tier": "tiny",
-        "max_gpus": 2,
+        "max_gpus": 4,
         "family": "qwen3",
     },
     "qwen3_vl_4b": {
         "model_name_or_path": "Qwen/Qwen3-VL-4B-Instruct",
         "template": "qwen3_vl_nothink",
         "tier": "tiny",
-        "max_gpus": 1,
+        "max_gpus": 4,
         "family": "qwen3",
     },
     "qwen3_vl_8b": {
@@ -29,7 +29,7 @@ MODEL_REGISTRY = {
         "model_name_or_path": "Qwen/Qwen3-VL-30B-A3B-Instruct",
         "template": "qwen3_vl_nothink",
         "tier": "large",
-        "max_gpus": 2,
+        "max_gpus": 4,
         "family": "qwen3",
     },
     "qwen3_vl_235b_a22b": {
@@ -44,14 +44,14 @@ MODEL_REGISTRY = {
         "model_name_or_path": "OpenGVLab/InternVL3_5-1B-HF",
         "template": "intern_vl",
         "tier": "tiny",
-        "max_gpus": 1,
+        "max_gpus": 4,
         "family": "internvl3",
     },
     "internvl3_4b": {
         "model_name_or_path": "OpenGVLab/InternVL3_5-4B-HF",
         "template": "intern_vl",
         "tier": "tiny",
-        "max_gpus": 1,
+        "max_gpus": 4,
         "family": "internvl3",
     },
     "internvl3_8b": {
@@ -65,14 +65,14 @@ MODEL_REGISTRY = {
         "model_name_or_path": "OpenGVLab/InternVL3_5-20B-HF",
         "template": "intern_vl",
         "tier": "medium",
-        "max_gpus": 2,
+        "max_gpus": 4,
         "family": "internvl3",
     },
     "internvl3_30b_a3b": {
         "model_name_or_path": "OpenGVLab/InternVL3_5-30B-A3B-HF",
         "template": "intern_vl",
         "tier": "large",
-        "max_gpus": 2,
+        "max_gpus": 4,
         "family": "internvl3",
     },
 }
@@ -122,7 +122,7 @@ HYPERPARAMETER_TIERS = {
         # 1-4B models, 1 GPU, optimized for speed
         "batch_size": 2,
         "grad_accum": 8,
-        "image_max_pixels": 262144,  # ~512x512 (optimized from 768x768)
+        "image_max_pixels": 196608,  # ~443x443 (reduced for faster tokenization)
         "image_min_pixels": 512,
         "video_max_pixels": 16384,  # Reduced from 65536
         "video_min_pixels": 256,
@@ -133,16 +133,17 @@ HYPERPARAMETER_TIERS = {
         "save_steps": 100,
         "deepspeed_stage": 2,  # ZeRO-2 sufficient
         "recommended_gpus": 1,
-        "preprocessing_num_workers": 8,  # Reduced from 16 (overhead reduction)
+        "preprocessing_num_workers": 48,
         "dataloader_num_workers": 4,
-        "pin_memory": True,  # Speed up GPU memory transfer
-        "overwrite_cache": False,  # Reuse cached datasets
+        "pin_memory": True,
+        "overwrite_cache": False,
+        "crop_to_patches": False,  # Disable dynamic patching for InternVL
     },
     "small": {
         # 8B models, 1-2 GPUs
         "batch_size": 2,
         "grad_accum": 8,
-        "image_max_pixels": 262144,  # Optimized
+        "image_max_pixels": 196608,  # ~443x443 (reduced for faster tokenization)
         "image_min_pixels": 512,
         "video_max_pixels": 16384,
         "video_min_pixels": 256,
@@ -153,16 +154,17 @@ HYPERPARAMETER_TIERS = {
         "save_steps": 200,
         "deepspeed_stage": 2,
         "recommended_gpus": 1,
-        "preprocessing_num_workers": 8,
+        "preprocessing_num_workers": 48,
         "dataloader_num_workers": 4,
         "pin_memory": True,
         "overwrite_cache": False,
+        "crop_to_patches": False,
     },
     "medium": {
         # 20B models, 2 GPUs
         "batch_size": 2,
         "grad_accum": 16,
-        "image_max_pixels": 262144,  # Optimized from 576*576
+        "image_max_pixels": 196608,  # ~443x443 (reduced for faster tokenization)
         "image_min_pixels": 512,
         "video_max_pixels": 16384,
         "video_min_pixels": 256,
@@ -171,18 +173,19 @@ HYPERPARAMETER_TIERS = {
         "num_epochs": 6,
         "eval_steps": 150,
         "save_steps": 300,
-        "deepspeed_stage": 3,  # Need ZeRO-3 for memory
+        "deepspeed_stage": 3,
         "recommended_gpus": 2,
-        "preprocessing_num_workers": 8,
+        "preprocessing_num_workers": 64,
         "dataloader_num_workers": 4,
         "pin_memory": True,
         "overwrite_cache": False,
+        "crop_to_patches": False,
     },
     "large": {
         # 30B sparse models, 2 GPUs
         "batch_size": 1,
         "grad_accum": 16,
-        "image_max_pixels": 262144,  # Optimized from 512*512
+        "image_max_pixels": 196608,  # ~443x443 (reduced for faster tokenization)
         "image_min_pixels": 512,
         "video_max_pixels": 16384,
         "video_min_pixels": 256,
@@ -193,16 +196,17 @@ HYPERPARAMETER_TIERS = {
         "save_steps": 400,
         "deepspeed_stage": 3,
         "recommended_gpus": 2,
-        "preprocessing_num_workers": 8,
+        "preprocessing_num_workers": 64,
         "dataloader_num_workers": 4,
         "pin_memory": True,
         "overwrite_cache": False,
+        "crop_to_patches": False,
     },
     "xlarge": {
         # 235B sparse models, 4 GPUs
         "batch_size": 1,
         "grad_accum": 32,
-        "image_max_pixels": 262144,  # Optimized from 512*512
+        "image_max_pixels": 196608,  # ~443x443 (reduced for faster tokenization)
         "image_min_pixels": 512,
         "video_max_pixels": 16384,
         "video_min_pixels": 256,
@@ -213,10 +217,11 @@ HYPERPARAMETER_TIERS = {
         "save_steps": 500,
         "deepspeed_stage": 3,
         "recommended_gpus": 4,
-        "preprocessing_num_workers": 8,
+        "preprocessing_num_workers": 64,
         "dataloader_num_workers": 4,
         "pin_memory": True,
         "overwrite_cache": False,
+        "crop_to_patches": False,
     },
 }
 

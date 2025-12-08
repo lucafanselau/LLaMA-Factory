@@ -3,7 +3,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --nodelist=node[15-20]
 #SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=32
 #SBATCH --mem=160G
 #SBATCH --time=2-12:12:00
 #SBATCH --job-name=train-qwen3_vl_8b_all_single_image_multi_image_single_tu

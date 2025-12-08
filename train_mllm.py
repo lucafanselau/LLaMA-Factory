@@ -31,6 +31,7 @@ class TrainingOrchestrator:
         hf_cache: str = "/storage/user/falu/.cache/huggingface",
         config_output: str = "training_configs",
         sbatch_output: str = "sbatch_scripts",
+        use_tokenized_cache: bool = True,
     ):
         self.model = model
         self.dataset = dataset
@@ -42,6 +43,7 @@ class TrainingOrchestrator:
         self.hf_cache = hf_cache
         self.config_output = Path(config_output)
         self.sbatch_output = Path(sbatch_output)
+        self.use_tokenized_cache = use_tokenized_cache
 
         self.config_output.mkdir(parents=True, exist_ok=True)
         self.sbatch_output.mkdir(parents=True, exist_ok=True)
@@ -99,6 +101,7 @@ class TrainingOrchestrator:
             dataset_dir=self.dataset_dir,
             output_base=self.output_base,
             hf_cache=self.hf_cache,
+            use_tokenized_cache=self.use_tokenized_cache,
         )
 
     def save_config(self, config_gen: ConfigGenerator) -> str:
@@ -182,6 +185,11 @@ def main():
     )
     parser.add_argument("--config_output", type=str, default="training_configs")
     parser.add_argument("--sbatch_output", type=str, default="sbatch_scripts")
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable tokenized dataset caching (reprocess each run)",
+    )
 
     args = parser.parse_args()
 
@@ -208,6 +216,7 @@ def main():
             output_base=args.output_base,
             config_output=args.config_output,
             sbatch_output=args.sbatch_output,
+            use_tokenized_cache=not args.no_cache,
         )
         orchestrator.validate_inputs()
 

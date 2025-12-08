@@ -25,6 +25,7 @@ class ConfigGenerator:
         dataset_dir: str = "/storage/user/falu/vis/processed",
         output_base: str = "/storage/user/falu/trained_models",
         hf_cache: str = "/storage/user/falu/.cache/huggingface",
+        use_tokenized_cache: bool = True,
     ):
         """Initialize config generator."""
         self.model_key = model_key
@@ -39,6 +40,7 @@ class ConfigGenerator:
         self.dataset_dir = dataset_dir
         self.output_base = output_base
         self.hf_cache = hf_cache
+        self.use_tokenized_cache = use_tokenized_cache
 
         # Get configurations
         self.model_config = get_model_config(model_key)
@@ -67,6 +69,11 @@ class ConfigGenerator:
             )
         else:
             self.deepspeed_config = DEEPSPEED_CONFIGS["z3_multi"]
+
+    def _get_tokenized_path(self, dataset_str: str) -> str:
+        """Get tokenized cache path based on model family and dataset."""
+        family = self.model_config["family"]
+        return str(Path(self.dataset_dir) / "tokenized" / family / dataset_str)
 
     def generate(self) -> Dict[str, Any]:
         """Generate complete training configuration."""
@@ -124,6 +131,8 @@ class ConfigGenerator:
             "image_min_pixels": self.hyperparams.get("image_min_pixels", 32 * 32),
             "video_max_pixels": self.hyperparams.get("video_max_pixels", 256 * 256),
             "video_min_pixels": self.hyperparams.get("video_min_pixels", 16 * 16),
+            # Limit image patching for InternVL (reduces tokens per image)
+            "crop_to_patches": self.hyperparams.get("crop_to_patches", False),
             # ====== DATASET ======
             "dataset": ",".join(train_datasets),
             "eval_dataset": ",".join(val_datasets),
@@ -133,10 +142,17 @@ class ConfigGenerator:
             "cutoff_len": 8192,
             "max_samples": self.hyperparams["max_samples"],
             "overwrite_cache": self.hyperparams.get("overwrite_cache", True),
+            "use_fast_tokenizer": True,
             "preprocessing_num_workers": self.hyperparams.get(
                 "preprocessing_num_workers", 16
             ),
             "dataloader_num_workers": self.hyperparams.get("dataloader_num_workers", 4),
+            # Tokenized cache path (shared across models of same family)
+            "tokenized_path": (
+                self._get_tokenized_path(dataset_str)
+                if self.use_tokenized_cache
+                else None
+            ),
             # ====== TRAINING HYPERPARAMETERS ======
             "output_dir": str(output_dir),
             "per_device_train_batch_size": per_device_batch_size,
