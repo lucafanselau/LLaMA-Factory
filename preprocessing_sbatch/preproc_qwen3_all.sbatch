@@ -3,7 +3,6 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=96G
-#SBATCH --nodelist=node[15-20]
 #SBATCH --time=0-12:00:00
 #SBATCH --job-name=preproc-qwen3-all
 #SBATCH --output=/usr/stud/falu/code/LLaMA-Factory/logs/preproc-%j.out

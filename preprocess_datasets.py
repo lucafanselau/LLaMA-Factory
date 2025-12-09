@@ -63,9 +63,15 @@ def generate_config(family: str, dataset_name: str, dataset_types: list[str]) ->
         
         stage: sft
         do_train: false
+
+        image_max_pixels: 196608
+        image_min_pixels: 512
+        video_max_pixels: 16384
+        video_min_pixels: 256
         
         dataset: {','.join(train_ds)}
         eval_dataset: {','.join(val_ds)}
+
         dataset_dir: {DATASET_DIR}
         media_dir: {Path(DATASET_DIR).parent}
         cutoff_len: 8192

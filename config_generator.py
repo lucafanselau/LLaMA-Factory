@@ -1,19 +1,21 @@
-"""YAML configuration generator for multimodal training."""
+"""YAML configuration generator for multimodal training with dynamic hyperparameters."""
 
-from typing import Dict, List, Optional, Any
+import json
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import yaml
 from train_config import (
     get_model_config,
-    get_hyperparams,
     get_finetuning_config,
     build_dataset_pairs,
-    DEEPSPEED_CONFIGS,
+    compute_optimal_config,
+    DATASET_VALIDATION_MAP,
 )
 
 
 class ConfigGenerator:
-    """Generate YAML training configurations."""
+    """Generate YAML training configurations with dynamic hyperparameter optimization."""
 
     def __init__(
         self,
@@ -22,12 +24,14 @@ class ConfigGenerator:
         finetuning_type: str = "full",
         dataset_types: Optional[List[str]] = None,
         num_gpus: int = 1,
+        gpu_vram_gb: int = 48,
         dataset_dir: str = "/storage/user/falu/vis/processed",
         output_base: str = "/storage/user/falu/trained_models",
         hf_cache: str = "/storage/user/falu/.cache/huggingface",
         use_tokenized_cache: bool = True,
+        eval_samples_per_dataset: int = 500,
+        num_epochs: int = 6,
     ):
-        """Initialize config generator."""
         self.model_key = model_key
         self.dataset_name = dataset_name
         self.finetuning_type = finetuning_type
@@ -37,62 +41,101 @@ class ConfigGenerator:
             "multi_image_multi_turn",
         ]
         self.num_gpus = num_gpus
+        self.gpu_vram_gb = gpu_vram_gb
         self.dataset_dir = dataset_dir
         self.output_base = output_base
         self.hf_cache = hf_cache
         self.use_tokenized_cache = use_tokenized_cache
+        self.eval_samples_per_dataset = eval_samples_per_dataset
+        self.num_epochs = num_epochs
 
-        # Get configurations
+        # Get model and finetuning configurations
         self.model_config = get_model_config(model_key)
-        self.tier = self.model_config["tier"]
-        self.hyperparams = get_hyperparams(self.tier)
         self.finetune_config = get_finetuning_config(finetuning_type)
 
         # Validate GPU count
-        max_gpus = self.model_config["max_gpus"]
-        if num_gpus > max_gpus:
-            raise ValueError(
-                f"Model {model_key} supports max {max_gpus} GPUs, "
-                f"but {num_gpus} requested"
-            )
+        min_gpus = self.model_config["min_gpus"]
+        if num_gpus < min_gpus:
+            raise ValueError(f"Model {model_key} requires at least {min_gpus} GPUs")
 
-        # Adjust DeepSpeed for GPU count
-        if num_gpus == 1 and not self.finetune_config.get("requires_deepspeed", False):
-            self.deepspeed_config = None
-        elif num_gpus == 1:
-            self.deepspeed_config = DEEPSPEED_CONFIGS["z2_1gpu"]
-        elif num_gpus <= 2:
-            self.deepspeed_config = (
-                DEEPSPEED_CONFIGS["z2_multi"]
-                if self.finetune_config.get("finetuning_type") != "full"
-                else DEEPSPEED_CONFIGS["z2_multi"]
-            )
-        else:
-            self.deepspeed_config = DEEPSPEED_CONFIGS["z3_multi"]
+        # Initial optimal config (will be recomputed with dataset size)
+        self.optimal = None
+        self._dataset_info = None
+        self._fast_eval_info = None
+
+    def _load_dataset_info(self) -> Dict[str, Any]:
+        """Load dataset_info.json."""
+        if self._dataset_info is not None:
+            return self._dataset_info
+
+        dataset_info_path = Path(self.dataset_dir) / "dataset_info.json"
+        if not dataset_info_path.exists():
+            self._dataset_info = {}
+            return self._dataset_info
+
+        with open(dataset_info_path) as f:
+            self._dataset_info = json.load(f)
+        return self._dataset_info
+
+    def _estimate_dataset_size(self, dataset_name: str) -> int:
+        """Estimate number of samples by counting JSONL lines."""
+        dataset_info = self._load_dataset_info()
+
+        if dataset_name not in dataset_info:
+            return 10000  # Conservative default
+
+        file_name = dataset_info[dataset_name].get("file_name", "")
+        file_path = Path(self.dataset_dir) / file_name
+
+        if file_path.exists():
+            try:
+                with open(file_path) as f:
+                    return sum(1 for _ in f)
+            except Exception:
+                return 10000
+
+        return 10000
+
+    def _get_total_train_samples(self, train_datasets: List[str]) -> int:
+        """Sum samples across all training datasets."""
+        total = sum(self._estimate_dataset_size(ds) for ds in train_datasets)
+        return max(total, 1000)  # Minimum to avoid division issues
+
+    def _generate_fast_eval_datasets(
+        self, val_datasets: List[str]
+    ) -> Tuple[Dict[str, Any], List[str]]:
+        """Generate dataset_info entries for fast validation with limited samples."""
+        dataset_info = self._load_dataset_info()
+        fast_eval_info = {}
+        fast_eval_names = []
+
+        for val_ds in val_datasets:
+            if val_ds not in dataset_info:
+                continue
+
+            fast_name = f"{val_ds}_fast"
+            fast_eval_info[fast_name] = {
+                **dataset_info[val_ds],
+                "num_samples": self.eval_samples_per_dataset,
+            }
+            fast_eval_names.append(fast_name)
+
+        return fast_eval_info, fast_eval_names
 
     def _get_tokenized_path(self, dataset_str: str) -> str:
         """Get tokenized cache path based on model family and dataset."""
         family = self.model_config["family"]
         return str(Path(self.dataset_dir) / "tokenized" / family / dataset_str)
 
-    def generate(self) -> Dict[str, Any]:
-        """Generate complete training configuration."""
-        # Build dataset pairs
+    def _build_datasets(self) -> Tuple[List[str], List[str], str]:
+        """Build train and validation dataset lists."""
         if self.dataset_name == "all":
-            # Get all available datasets for this model family
-            from train_config import DATASET_VALIDATION_MAP
-
             model_family = self.model_config["family"]
-            all_train_datasets = []
-            all_val_datasets = []
-
+            train_datasets, val_datasets = [], []
             for train_key, val_key in DATASET_VALIDATION_MAP.items():
                 if f"_{model_family}_" in train_key:
-                    all_train_datasets.append(train_key)
-                    all_val_datasets.append(val_key)
-
-            train_datasets = all_train_datasets
-            val_datasets = all_val_datasets
+                    train_datasets.append(train_key)
+                    val_datasets.append(val_key)
             dataset_str = "all"
         else:
             train_datasets, val_datasets = build_dataset_pairs(
@@ -102,12 +145,33 @@ class ConfigGenerator:
             )
             dataset_str = f"{self.dataset_name}_{'_'.join(self.dataset_types)}"
 
-        # Effective batch size calculation
-        per_device_batch_size = self.hyperparams["batch_size"]
-        grad_accum = self.hyperparams["grad_accum"]
-        effective_batch_size = per_device_batch_size * grad_accum * self.num_gpus
+        return train_datasets, val_datasets, dataset_str
 
-        # Output directory
+    def generate(self) -> Dict[str, Any]:
+        """Generate complete training configuration."""
+        train_datasets, val_datasets, dataset_str = self._build_datasets()
+
+        # Estimate total training samples for smart eval scheduling
+        total_train_samples = self._get_total_train_samples(train_datasets)
+
+        # Compute optimal hyperparameters with dataset size awareness
+        self.optimal = compute_optimal_config(
+            model_key=self.model_key,
+            finetuning_type=self.finetuning_type,
+            num_gpus=self.num_gpus,
+            gpu_vram_gb=self.gpu_vram_gb,
+            total_train_samples=total_train_samples,
+            num_epochs=self.num_epochs,
+        )
+
+        # Generate fast eval dataset entries
+        self._fast_eval_info, fast_eval_names = self._generate_fast_eval_datasets(
+            val_datasets
+        )
+
+        # Use fast eval datasets if available, otherwise fall back to full
+        eval_dataset_names = fast_eval_names if fast_eval_names else val_datasets
+
         output_dir = (
             Path(self.output_base) / self.model_key / self.finetuning_type / dataset_str
         )
@@ -127,39 +191,35 @@ class ConfigGenerator:
                 "freeze_multi_modal_projector"
             ],
             "freeze_language_model": self.finetune_config["freeze_language_model"],
-            "image_max_pixels": self.hyperparams["image_max_pixels"],
-            "image_min_pixels": self.hyperparams.get("image_min_pixels", 32 * 32),
-            "video_max_pixels": self.hyperparams.get("video_max_pixels", 256 * 256),
-            "video_min_pixels": self.hyperparams.get("video_min_pixels", 16 * 16),
-            # Limit image patching for InternVL (reduces tokens per image)
-            "crop_to_patches": self.hyperparams.get("crop_to_patches", False),
+            "image_max_pixels": 196608,
+            "image_min_pixels": 512,
+            "video_max_pixels": 16384,
+            "video_min_pixels": 256,
+            "crop_to_patches": False,
             # ====== DATASET ======
             "dataset": ",".join(train_datasets),
-            "eval_dataset": ",".join(val_datasets),
-            "eval_on_each_dataset": False,
+            "eval_dataset": ",".join(eval_dataset_names),
+            "eval_on_each_dataset": True,
             "dataset_dir": self.dataset_dir,
             "media_dir": str(Path(self.dataset_dir).parent),
             "cutoff_len": 8192,
-            "max_samples": self.hyperparams["max_samples"],
-            "overwrite_cache": self.hyperparams.get("overwrite_cache", True),
+            "max_samples": None,
+            "overwrite_cache": False,
             "use_fast_tokenizer": True,
-            "preprocessing_num_workers": self.hyperparams.get(
-                "preprocessing_num_workers", 16
-            ),
-            "dataloader_num_workers": self.hyperparams.get("dataloader_num_workers", 4),
-            # Tokenized cache path (shared across models of same family)
+            "preprocessing_num_workers": self.optimal["preprocessing_num_workers"],
+            "dataloader_num_workers": self.optimal["dataloader_num_workers"],
             "tokenized_path": (
                 self._get_tokenized_path(dataset_str)
                 if self.use_tokenized_cache
                 else None
             ),
-            # ====== TRAINING HYPERPARAMETERS ======
+            # ====== TRAINING HYPERPARAMETERS (dynamically computed) ======
             "output_dir": str(output_dir),
-            "per_device_train_batch_size": per_device_batch_size,
-            "per_device_eval_batch_size": per_device_batch_size,
-            "gradient_accumulation_steps": grad_accum,
-            "learning_rate": self.hyperparams["learning_rate"],
-            "num_train_epochs": self.hyperparams["num_epochs"],
+            "per_device_train_batch_size": self.optimal["batch_size"],
+            "per_device_eval_batch_size": self.optimal["batch_size"],
+            "gradient_accumulation_steps": self.optimal["grad_accum"],
+            "learning_rate": self.optimal["learning_rate"],
+            "num_train_epochs": self.optimal["num_epochs"],
             "lr_scheduler_type": "cosine",
             "warmup_ratio": 0.1,
             "bf16": True,
@@ -167,18 +227,17 @@ class ConfigGenerator:
             "max_grad_norm": 1.0,
             # ====== EVALUATION ======
             "eval_strategy": "steps",
-            "eval_steps": 0.5,  # self.hyperparams["eval_steps"],
+            "eval_steps": self.optimal["eval_steps"],
             "save_strategy": "steps",
-            "save_steps": self.hyperparams["save_steps"],
+            "save_steps": self.optimal["save_steps"],
             "logging_steps": 10,
             "log_level": "info",
             # ====== OUTPUT ======
-            "output_dir": str(output_dir),
             "save_only_model": False,
             "overwrite_output_dir": True,
             "plot_loss": True,
             "report_to": "wandb",
-            "run_name": f"{self.model_key}_{self.dataset_name}_{'_'.join(self.dataset_types)}",
+            "run_name": f"{self.model_key}_{self.dataset_name}_{'_'.join(self.dataset_types)}_{datetime.now().strftime('%Y%m%d_%H%M')}",
             # ====== OPTIMIZATION ======
             "optim": "adamw_torch",
             "resume_from_checkpoint": None,
@@ -197,7 +256,7 @@ class ConfigGenerator:
             )
 
         # Add quantization if needed
-        if self.finetune_config["quantization_bit"] is not None:
+        if self.finetune_config.get("quantization_bit") is not None:
             config.update(
                 {
                     "quantization_bit": self.finetune_config["quantization_bit"],
@@ -207,37 +266,121 @@ class ConfigGenerator:
                 }
             )
 
-        # Add DeepSpeed if needed
-        if self.deepspeed_config and self.finetune_config.get("use_deepspeed", False):
-            config["deepspeed"] = self.deepspeed_config
+        # Add DeepSpeed if computed necessary
+        if self.optimal["deepspeed_config"]:
+            config["deepspeed"] = self.optimal["deepspeed_config"]
 
         return config
 
-    def to_yaml(self) -> str:
+    def to_yaml(self, config: Optional[Dict[str, Any]] = None) -> str:
         """Convert config to YAML string."""
-        config = self.generate()
+        if config is None:
+            config = self.generate()
 
-        # Custom YAML representer for None to use "null"
-        def represent_none(self, _):
-            return self.represent_scalar("tag:yaml.org,2002:null", "null")
+        def represent_none(dumper, _):
+            return dumper.represent_scalar("tag:yaml.org,2002:null", "null")
 
         yaml.add_representer(type(None), represent_none)
-
-        yaml_str = yaml.dump(config, default_flow_style=False, sort_keys=False)
-        return yaml_str
+        return yaml.dump(config, default_flow_style=False, sort_keys=False)
 
     def save(self, path: str) -> None:
-        """Save config to YAML file."""
+        """Save config and update dataset_info.json with fast eval entries."""
+        config = self.generate()
+
+        # Save YAML config
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
-            f.write(self.to_yaml())
+            f.write(self.to_yaml(config))
         print(f"✓ Config saved to: {path}")
 
+        # Update dataset_info.json with fast eval entries if any
+        if self._fast_eval_info:
+            dataset_info_path = Path(self.dataset_dir) / "dataset_info.json"
+            existing = self._load_dataset_info()
+
+            # Only add new entries that don't exist
+            new_entries = {
+                k: v for k, v in self._fast_eval_info.items() if k not in existing
+            }
+
+            if new_entries:
+                existing.update(new_entries)
+                with open(dataset_info_path, "w") as f:
+                    json.dump(existing, f, indent=4)
+                print(
+                    f"✓ Added {len(new_entries)} fast eval datasets to dataset_info.json"
+                )
+
     def print_config(self) -> None:
-        """Pretty print configuration."""
+        """Pretty print configuration with computed settings."""
         config = self.generate()
         print("\n" + "=" * 70)
-        print(f"TRAINING CONFIGURATION")
+        print("TRAINING CONFIGURATION")
         print("=" * 70)
+        print(f"Model: {self.model_key} ({self.model_config['params_b']}B params)")
+        print(f"GPUs: {self.num_gpus}x {self.gpu_vram_gb}GB")
+        print(f"Effective batch size: {self.optimal['effective_batch_size']}")
+        print(
+            f"  = {self.optimal['batch_size']} batch × {self.num_gpus} GPUs × {self.optimal['grad_accum']} accum"
+        )
+
+        if self.optimal.get("steps_per_epoch"):
+            print(f"Steps/epoch: {self.optimal['steps_per_epoch']}")
+            print(f"Total steps: {self.optimal['total_steps']}")
+            print(f"Eval every: {self.optimal['eval_steps']} steps")
+            print(f"Save every: {self.optimal['save_steps']} steps")
+            evals_per_epoch = (
+                self.optimal["steps_per_epoch"] // self.optimal["eval_steps"]
+            )
+            print(f"  (~{evals_per_epoch} evals per epoch)")
+
+        if self._fast_eval_info:
+            print(
+                f"Fast eval: {len(self._fast_eval_info)} datasets @ {self.eval_samples_per_dataset} samples each"
+            )
+
+        ds = (
+            "ZeRO-" + self.optimal["deepspeed_config"].split("_z")[1].split("_")[0]
+            if self.optimal["deepspeed_config"]
+            else "None (DDP)"
+        )
+        print(f"DeepSpeed: {ds}")
+        print("-" * 70)
         print(yaml.dump(config, default_flow_style=False, sort_keys=False))
         print("=" * 70)
+
+    def generate_full_eval_config(self, checkpoint_path: str) -> Dict[str, Any]:
+        """Generate config for full evaluation after training (no sample limits)."""
+        train_datasets, val_datasets, dataset_str = self._build_datasets()
+
+        return {
+            "stage": "sft",
+            "do_eval": True,
+            "do_train": False,
+            "model_name_or_path": checkpoint_path,
+            "template": self.model_config["template"],
+            "trust_remote_code": True,
+            "finetuning_type": self.finetune_config["finetuning_type"],
+            "eval_dataset": ",".join(val_datasets),  # Full datasets, not _fast
+            "eval_on_each_dataset": True,
+            "dataset_dir": self.dataset_dir,
+            "media_dir": str(Path(self.dataset_dir).parent),
+            "cutoff_len": 8192,
+            "per_device_eval_batch_size": (
+                self.optimal["batch_size"] if self.optimal else 8
+            ),
+            "preprocessing_num_workers": 16,
+            "bf16": True,
+            "report_to": "none",
+            "output_dir": str(Path(checkpoint_path).parent / "full_eval"),
+        }
+
+    def save_full_eval_config(
+        self, checkpoint_path: str, eval_config_path: str
+    ) -> None:
+        """Save a separate config for full evaluation."""
+        config = self.generate_full_eval_config(checkpoint_path)
+        Path(eval_config_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(eval_config_path, "w") as f:
+            f.write(self.to_yaml(config))
+        print(f"✓ Full eval config saved to: {eval_config_path}")

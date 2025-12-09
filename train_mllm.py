@@ -10,9 +10,10 @@ from config_generator import ConfigGenerator
 from sbatch_generator import SbatchGenerator
 from train_config import (
     MODEL_REGISTRY,
+    DATASET_VALIDATION_MAP,
+    FINETUNING_CONFIGS,
     list_available_models,
     list_available_datasets,
-    FINETUNING_CONFIGS,
 )
 
 
@@ -26,24 +27,30 @@ class TrainingOrchestrator:
         finetuning_type: str = "full",
         dataset_types: Optional[List[str]] = None,
         num_gpus: int = 1,
+        gpu_vram_gb: int = 48,
         dataset_dir: str = "/storage/user/falu/vis/processed",
         output_base: str = "/storage/user/falu/trained_models",
         hf_cache: str = "/storage/user/falu/.cache/huggingface",
         config_output: str = "training_configs",
         sbatch_output: str = "sbatch_scripts",
         use_tokenized_cache: bool = True,
+        eval_samples: int = 500,
+        num_epochs: int = 6,
     ):
         self.model = model
         self.dataset = dataset
         self.finetuning_type = finetuning_type
         self.dataset_types = dataset_types
         self.num_gpus = num_gpus
+        self.gpu_vram_gb = gpu_vram_gb
         self.dataset_dir = dataset_dir
         self.output_base = output_base
         self.hf_cache = hf_cache
         self.config_output = Path(config_output)
         self.sbatch_output = Path(sbatch_output)
         self.use_tokenized_cache = use_tokenized_cache
+        self.eval_samples = eval_samples
+        self.num_epochs = num_epochs
 
         self.config_output.mkdir(parents=True, exist_ok=True)
         self.sbatch_output.mkdir(parents=True, exist_ok=True)
@@ -62,10 +69,9 @@ class TrainingOrchestrator:
             )
 
         model_config = MODEL_REGISTRY[self.model]
-        if self.num_gpus > model_config["max_gpus"]:
-            raise ValueError(
-                f"Model {self.model} supports max {model_config['max_gpus']} GPUs, but {self.num_gpus} requested"
-            )
+        min_gpus = model_config["min_gpus"]
+        if self.num_gpus < min_gpus:
+            raise ValueError(f"Model {self.model} requires at least {min_gpus} GPUs")
 
         if self.dataset != "all":
             datasets = self._get_available_datasets()
@@ -78,8 +84,6 @@ class TrainingOrchestrator:
     @staticmethod
     def _get_available_datasets() -> set:
         """Get set of available dataset names."""
-        from train_config import DATASET_VALIDATION_MAP
-
         datasets = set()
         for key in DATASET_VALIDATION_MAP.keys():
             parts = key.split("_")
@@ -98,10 +102,13 @@ class TrainingOrchestrator:
             finetuning_type=self.finetuning_type,
             dataset_types=self.dataset_types,
             num_gpus=self.num_gpus,
+            gpu_vram_gb=self.gpu_vram_gb,
             dataset_dir=self.dataset_dir,
             output_base=self.output_base,
             hf_cache=self.hf_cache,
             use_tokenized_cache=self.use_tokenized_cache,
+            eval_samples_per_dataset=self.eval_samples,
+            num_epochs=self.num_epochs,
         )
 
     def save_config(self, config_gen: ConfigGenerator) -> str:
@@ -111,28 +118,17 @@ class TrainingOrchestrator:
             f"{self.model}_{self.dataset}_{dataset_str}_{self.finetuning_type}.yaml"
         )
         config_path = self.config_output / config_name
-
         config_gen.save(str(config_path))
         return str(config_path)
 
     def create_sbatch(self, config_path: str) -> str:
-        """Create SLURM sbatch script with smart resource allocation."""
+        """Create SLURM sbatch script."""
         config_stem = Path(config_path).stem
         sbatch_name = f"{config_stem}.sbatch"
         sbatch_path = self.sbatch_output / sbatch_name
 
         job_name = f"train-{config_stem[:50]}"
-
-        # Get model tier for smart resource allocation
         model_config = MODEL_REGISTRY.get(self.model, {})
-        model_tier = model_config.get("tier", "small")
-
-        # Get hyperparams to extract preprocessing workers and batch size
-        from train_config import get_hyperparams
-
-        hyperparams = get_hyperparams(model_tier)
-        preprocessing_num_workers = hyperparams.get("preprocessing_num_workers", 8)
-        batch_size = hyperparams.get("batch_size", 2)
 
         sbatch_gen = SbatchGenerator(
             config_path=config_path,
@@ -140,19 +136,15 @@ class TrainingOrchestrator:
             job_name=job_name,
             output_dir="/usr/stud/falu/code/LLaMA-Factory/logs",
             hf_cache=self.hf_cache,
-            model_tier=model_tier,
-            preprocessing_num_workers=preprocessing_num_workers,
-            batch_size=batch_size,
+            gpu_vram_gb=self.gpu_vram_gb,
+            model_params_b=model_config.get("params_b", 2.0),
         )
         sbatch_gen.save(str(sbatch_path))
         return str(sbatch_path)
 
 
 def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Vision-language model training with SLURM"
-    )
+    parser = argparse.ArgumentParser(description="VLM training with SLURM")
 
     parser.add_argument("--model", type=str, help="Model to train (e.g., qwen3_vl_2b)")
     parser.add_argument("--dataset", type=str, default="all", help="Dataset name")
@@ -170,6 +162,7 @@ def main():
         help="Finetuning method",
     )
     parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs")
+    parser.add_argument("--gpu_vram", type=int, default=48, help="GPU VRAM in GB")
     parser.add_argument("--sbatch", action="store_true", help="Generate SLURM script")
     parser.add_argument("--submit", action="store_true", help="Submit SLURM job")
     parser.add_argument("--preview", action="store_true", help="Preview config")
@@ -186,9 +179,16 @@ def main():
     parser.add_argument("--config_output", type=str, default="training_configs")
     parser.add_argument("--sbatch_output", type=str, default="sbatch_scripts")
     parser.add_argument(
-        "--no-cache",
-        action="store_true",
-        help="Disable tokenized dataset caching (reprocess each run)",
+        "--no-cache", action="store_true", help="Disable tokenized dataset caching"
+    )
+    parser.add_argument(
+        "--eval_samples",
+        type=int,
+        default=500,
+        help="Samples per eval dataset for fast validation during training",
+    )
+    parser.add_argument(
+        "--num_epochs", type=int, default=6, help="Number of training epochs"
     )
 
     args = parser.parse_args()
@@ -212,11 +212,14 @@ def main():
             finetuning_type=args.finetuning_type,
             dataset_types=args.dataset_type,
             num_gpus=args.num_gpus,
+            gpu_vram_gb=args.gpu_vram,
             dataset_dir=args.dataset_dir,
             output_base=args.output_base,
             config_output=args.config_output,
             sbatch_output=args.sbatch_output,
             use_tokenized_cache=not args.no_cache,
+            eval_samples=args.eval_samples,
+            num_epochs=args.num_epochs,
         )
         orchestrator.validate_inputs()
 

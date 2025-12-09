@@ -4,6 +4,8 @@ __pycache__/
 *$py.class
 
 logs/
+training_configs/
+sbatch_scripts/
 
 # C extensions
 *.so
