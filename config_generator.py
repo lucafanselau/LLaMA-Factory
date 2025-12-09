@@ -31,6 +31,8 @@ class ConfigGenerator:
         use_tokenized_cache: bool = True,
         eval_samples_per_dataset: int = 500,
         num_epochs: int = 6,
+        safety_margin: float = 0.75,
+        enable_gradient_checkpointing: bool = True,
     ):
         self.model_key = model_key
         self.dataset_name = dataset_name
@@ -48,6 +50,8 @@ class ConfigGenerator:
         self.use_tokenized_cache = use_tokenized_cache
         self.eval_samples_per_dataset = eval_samples_per_dataset
         self.num_epochs = num_epochs
+        self.safety_margin = safety_margin
+        self.enable_gradient_checkpointing = enable_gradient_checkpointing
 
         # Get model and finetuning configurations
         self.model_config = get_model_config(model_key)
@@ -162,6 +166,8 @@ class ConfigGenerator:
             gpu_vram_gb=self.gpu_vram_gb,
             total_train_samples=total_train_samples,
             num_epochs=self.num_epochs,
+            safety_margin=self.safety_margin,
+            enable_gradient_checkpointing=self.enable_gradient_checkpointing,
         )
 
         # Generate fast eval dataset entries
@@ -244,6 +250,7 @@ class ConfigGenerator:
             "run_name": f"{self.model_key}_{self.dataset_name}_{'_'.join(self.dataset_types)}_{datetime.now().strftime('%Y%m%d_%H%M')}",
             # ====== OPTIMIZATION ======
             "optim": "adamw_torch",
+            "gradient_checkpointing": self.optimal["gradient_checkpointing"],
             "resume_from_checkpoint": None,
         }
 

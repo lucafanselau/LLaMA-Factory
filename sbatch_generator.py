@@ -108,6 +108,7 @@ class SbatchGenerator:
             
             source /home/stud/falu/code/LLaMA-Factory/.venv/bin/activate
             export HF_HOME={self.hf_cache}
+            export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
         """
         )
 

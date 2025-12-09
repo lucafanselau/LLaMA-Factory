@@ -36,6 +36,8 @@ class TrainingOrchestrator:
         use_tokenized_cache: bool = True,
         eval_samples: int = 500,
         num_epochs: int = 6,
+        safety_margin: float = 0.75,
+        enable_gradient_checkpointing: bool = True,
     ):
         self.model = model
         self.dataset = dataset
@@ -51,6 +53,8 @@ class TrainingOrchestrator:
         self.use_tokenized_cache = use_tokenized_cache
         self.eval_samples = eval_samples
         self.num_epochs = num_epochs
+        self.safety_margin = safety_margin
+        self.enable_gradient_checkpointing = enable_gradient_checkpointing
 
         self.config_output.mkdir(parents=True, exist_ok=True)
         self.sbatch_output.mkdir(parents=True, exist_ok=True)
@@ -109,6 +113,8 @@ class TrainingOrchestrator:
             use_tokenized_cache=self.use_tokenized_cache,
             eval_samples_per_dataset=self.eval_samples,
             num_epochs=self.num_epochs,
+            safety_margin=self.safety_margin,
+            enable_gradient_checkpointing=self.enable_gradient_checkpointing,
         )
 
     def save_config(self, config_gen: ConfigGenerator) -> str:
@@ -190,6 +196,17 @@ def main():
     parser.add_argument(
         "--num_epochs", type=int, default=6, help="Number of training epochs"
     )
+    parser.add_argument(
+        "--safety_margin",
+        type=float,
+        default=0.75,
+        help="Memory safety margin (0.6-0.8 recommended, lower=more conservative)",
+    )
+    parser.add_argument(
+        "--no-gradient-checkpointing",
+        action="store_true",
+        help="Disable gradient checkpointing (uses more memory but slightly faster)",
+    )
 
     args = parser.parse_args()
 
@@ -220,6 +237,8 @@ def main():
             use_tokenized_cache=not args.no_cache,
             eval_samples=args.eval_samples,
             num_epochs=args.num_epochs,
+            safety_margin=args.safety_margin,
+            enable_gradient_checkpointing=not args.no_gradient_checkpointing,
         )
         orchestrator.validate_inputs()
 

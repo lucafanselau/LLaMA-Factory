@@ -185,9 +185,11 @@ def compute_optimal_config(
     target_effective_batch: int = 32,
     total_train_samples: Optional[int] = None,
     num_epochs: int = 6,
+    safety_margin: float = 0.75,
+    enable_gradient_checkpointing: bool = True,
 ) -> Dict[str, Any]:
     """
-    Dynamically compute optimal training configuration for maximum throughput.
+    Dynamically compute optimal training configuration with improved memory estimation.
 
     Principles for maximizing it/s:
     1. Maximize batch_size to fully utilize GPU memory
@@ -196,41 +198,71 @@ def compute_optimal_config(
     4. For multi-GPU without memory pressure, prefer DDP over DeepSpeed
 
     Memory estimation (bf16 training):
-    - Full: weights (2B/param) + optimizer (8B/param for AdamW fp32) + grads (2B/param) = ~6GB/B
-    - LoRA: weights (2B/param) + negligible LoRA overhead = ~2.2GB/B
-    - QLoRA: 4-bit weights (~0.5B/param) + LoRA = ~0.8GB/B
+    - Full: weights (2B/param) + optimizer (8B/param) + grads (2B/param) + activations
+    - LoRA: weights (2B/param) + negligible LoRA overhead + activations
+    - QLoRA: 4-bit weights (~0.5B/param) + LoRA + activations
+
+    VLM-specific: Activation memory is 30-50% of model size due to long sequences
+    from image patches. Gradient checkpointing reduces this by ~60%.
 
     Args:
         total_train_samples: If provided, computes absolute eval/save steps
-                            instead of fractional values.
-        num_epochs: Number of training epochs.
+        num_epochs: Number of training epochs
+        safety_margin: Fraction of available memory to use (0.6-0.8 recommended)
+        enable_gradient_checkpointing: Reduces activation memory by ~60%
     """
     model = MODEL_REGISTRY[model_key]
     params_b = model["params_b"]
     active_params_b = model["active_params_b"]
 
-    # Memory per billion params based on finetuning type
-    # VLMs need extra headroom due to vision encoder activations
+    # Improved memory estimation with separate components
     if finetuning_type == "full":
-        # Full: weights + AdamW optimizer states + gradients + activation overhead
-        # For MoE: all params for storage, active params for optimizer/gradients
-        gb_per_b_storage = 2.0  # bf16 weights
-        gb_per_b_training = 6.0  # optimizer + gradients + activation buffers
-        model_mem_gb = params_b * gb_per_b_storage + active_params_b * gb_per_b_training
+        # Base model memory (weights in bf16)
+        weights_mem = params_b * 2.0
+
+        # Optimizer states (AdamW: 2 states * 4 bytes each for active params)
+        optimizer_mem = active_params_b * 8.0
+
+        # Gradients (bf16 for active params)
+        gradient_mem = active_params_b * 2.0
+
+        # Vision model activations (MUCH higher for VLMs)
+        # Image patches create 100s-1000s of tokens, attention is O(seq_len^2)
+        activation_overhead = params_b * 0.4
+
+        if enable_gradient_checkpointing:
+            # Gradient checkpointing reduces activation memory by ~60%
+            activation_overhead *= 0.4
+
+        model_mem_gb = weights_mem + optimizer_mem + gradient_mem + activation_overhead
+
     elif finetuning_type == "lora":
-        # LoRA: frozen bf16 weights + tiny LoRA overhead
-        model_mem_gb = params_b * 2.5
+        # Frozen weights (bf16) + small LoRA adapters + activations
+        weights_mem = params_b * 2.0
+        lora_mem = 0.5  # LoRA adapters are tiny
+        activation_overhead = (
+            params_b * 0.3 if not enable_gradient_checkpointing else params_b * 0.15
+        )
+        model_mem_gb = weights_mem + lora_mem + activation_overhead
+
     else:  # qlora
-        # QLoRA: 4-bit weights + LoRA
-        model_mem_gb = params_b * 1.0
+        # 4-bit quantized weights + LoRA
+        weights_mem = params_b * 0.5
+        lora_mem = 0.5
+        activation_overhead = (
+            params_b * 0.2 if not enable_gradient_checkpointing else params_b * 0.1
+        )
+        model_mem_gb = weights_mem + lora_mem + activation_overhead
 
-    # Per-sample memory for VLMs is HIGH due to:
-    # - Image patches expand to many tokens (up to 12 patches * 256 tokens = 3072 tokens)
-    # - Attention activation scales O(seq_len^2)
-    # - Multi-image samples multiply this further
-    mem_per_sample_gb = 4.0  # Conservative for VLM training
+    # Per-sample memory: VLM batches are HEAVY
+    # Multi-image samples can have 10K+ tokens with attention O(n^2)
+    if enable_gradient_checkpointing:
+        mem_per_sample_gb = 2.5  # Reduced with checkpointing
+    else:
+        mem_per_sample_gb = 5.0  # Conservative for VLM
 
-    usable_vram = gpu_vram_gb * 0.88  # More conservative (88% utilization)
+    # More conservative VRAM usage - leave room for CUDA overhead
+    usable_vram = gpu_vram_gb * 0.85  # 85% max utilization
     total_vram = usable_vram * num_gpus
 
     # Determine DeepSpeed necessity
@@ -238,17 +270,15 @@ def compute_optimal_config(
         deepspeed_config = None
         effective_model_mem = model_mem_gb
     elif model_mem_gb > usable_vram:
-        if model_mem_gb > total_vram * 0.85:
+        if model_mem_gb > total_vram * 0.8:  # Need ZeRO-3
             deepspeed_config = DEEPSPEED_CONFIGS["z3"]
             effective_model_mem = model_mem_gb / num_gpus
-        else:
+        else:  # ZeRO-2 sufficient
             deepspeed_config = DEEPSPEED_CONFIGS["z2"]
-            # ZeRO-2: model stays, optimizer/grads sharded
             weights_mem = params_b * 2
             trainable_mem = (model_mem_gb - weights_mem) / num_gpus
             effective_model_mem = weights_mem + trainable_mem
     elif num_gpus > 1 and params_b > 15 and finetuning_type == "full":
-        # Large model full finetuning: ZeRO-2 helps with optimizer memory
         deepspeed_config = DEEPSPEED_CONFIGS["z2"]
         weights_mem = params_b * 2
         trainable_mem = (model_mem_gb - weights_mem) / num_gpus
@@ -257,10 +287,23 @@ def compute_optimal_config(
         deepspeed_config = None
         effective_model_mem = model_mem_gb
 
-    # Calculate batch size
+    # Smarter batch size calculation with safety margin
     available_for_batch = usable_vram - effective_model_mem
-    max_batch_size = max(1, int(available_for_batch / mem_per_sample_gb))
-    batch_size = min(max_batch_size, 8)
+    safe_batch_mem = available_for_batch * safety_margin
+    max_batch_size = max(1, int(safe_batch_mem / mem_per_sample_gb))
+
+    # Cap based on model size to avoid OOM spikes
+    if finetuning_type == "full":
+        if params_b >= 20:
+            batch_size = min(max_batch_size, 2)  # Very conservative for large models
+        elif params_b >= 8:
+            batch_size = min(max_batch_size, 4)
+        else:
+            batch_size = min(max_batch_size, 6)
+    else:  # LoRA/QLoRA can handle larger batches
+        batch_size = min(max_batch_size, 8)
+
+    batch_size = max(1, batch_size)
 
     # Gradient accumulation
     current_effective = batch_size * num_gpus
@@ -305,6 +348,7 @@ def compute_optimal_config(
         "grad_accum": grad_accum,
         "learning_rate": lr,
         "deepspeed_config": deepspeed_config,
+        "gradient_checkpointing": enable_gradient_checkpointing,
         "dataloader_num_workers": dataloader_workers,
         "preprocessing_num_workers": preproc_workers,
         "eval_steps": eval_steps,

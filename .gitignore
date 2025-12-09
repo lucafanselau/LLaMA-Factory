@@ -4,8 +4,9 @@ __pycache__/
 *$py.class
 
 logs/
-training_configs/
-sbatch_scripts/
+training_configs/*.yaml
+sbatch_scripts/*.sbatch
+wandb/*
 
 # C extensions
 *.so

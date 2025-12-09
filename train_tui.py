@@ -63,6 +63,15 @@ def preview_config(config_gen: ConfigGenerator) -> None:
     table.add_row("Finetuning", config_gen.finetuning_type)
     table.add_row("GPUs", f"{config_gen.num_gpus}x {config_gen.gpu_vram_gb}GB")
     table.add_row("Batch Size", str(config_gen.optimal["effective_batch_size"]))
+    table.add_row(
+        "Per-Device Batch",
+        f"{config_gen.optimal['batch_size']} (grad accum: {config_gen.optimal['grad_accum']})",
+    )
+    table.add_row("Safety Margin", f"{config_gen.safety_margin:.2f}")
+    table.add_row(
+        "Gradient Checkpointing",
+        "✓ Enabled" if config_gen.enable_gradient_checkpointing else "✗ Disabled",
+    )
 
     if config_gen.optimal.get("steps_per_epoch"):
         table.add_row("Steps/Epoch", str(config_gen.optimal["steps_per_epoch"]))
@@ -84,6 +93,10 @@ def preview_config(config_gen: ConfigGenerator) -> None:
         else "DDP"
     )
     table.add_row("DeepSpeed", ds)
+    table.add_row(
+        "Estimated VRAM",
+        f"{config_gen.optimal['estimated_vram_per_gpu']}GB per GPU",
+    )
 
     console.print()
     console.print(table)
@@ -263,6 +276,33 @@ def configure_job() -> dict | None:
     if eval_samples is None:
         return None
 
+    # Memory optimization parameters
+    safety_margin = questionary.select(
+        "Memory safety margin (lower = more conservative):",
+        choices=[
+            questionary.Choice(
+                "0.60 (Very conservative, recommended for OOM issues)", "0.60"
+            ),
+            questionary.Choice("0.70 (Conservative)", "0.70"),
+            questionary.Choice("0.75 (Balanced - default)", "0.75"),
+            questionary.Choice("0.80 (Aggressive)", "0.80"),
+        ],
+        default="0.75",
+        style=custom_style,
+    ).ask()
+
+    if safety_margin is None:
+        return None
+
+    gradient_checkpointing = questionary.confirm(
+        "Enable gradient checkpointing? (Saves ~40% memory, slight speed cost)",
+        default=True,
+        style=custom_style,
+    ).ask()
+
+    if gradient_checkpointing is None:
+        return None
+
     return {
         "model": model,
         "dataset": dataset,
@@ -272,6 +312,8 @@ def configure_job() -> dict | None:
         "gpu_vram": int(gpu_vram),
         "num_epochs": int(num_epochs),
         "eval_samples": int(eval_samples),
+        "safety_margin": float(safety_margin),
+        "gradient_checkpointing": gradient_checkpointing,
     }
 
 
@@ -286,6 +328,8 @@ def create_config_generator(config: dict) -> ConfigGenerator:
         gpu_vram_gb=config["gpu_vram"],
         num_epochs=config["num_epochs"],
         eval_samples_per_dataset=config["eval_samples"],
+        safety_margin=config.get("safety_margin", 0.75),
+        enable_gradient_checkpointing=config.get("gradient_checkpointing", True),
     )
 
 
@@ -334,11 +378,16 @@ def submit_job(config: dict) -> None:
         str(config["num_epochs"]),
         "--eval_samples",
         str(config["eval_samples"]),
+        "--safety_margin",
+        str(config.get("safety_margin", 0.75)),
         "--sbatch",
     ]
 
     if config["dataset_types"]:
         cmd.extend(["--dataset_type"] + config["dataset_types"])
+
+    if not config.get("gradient_checkpointing", True):
+        cmd.append("--no-gradient-checkpointing")
 
     # Ask whether to submit or just generate
     submit_action = questionary.select(
