@@ -232,6 +232,10 @@ class ConfigGenerator:
             "save_steps": self.optimal["save_steps"],
             "logging_steps": 10,
             "log_level": "info",
+            # ====== GROUNDING METRICS ======
+            "predict_with_generate": True,
+            "compute_grounding_iou": True,
+            "grounding_model_family": self.model_config["family"],
             # ====== OUTPUT ======
             "save_only_model": False,
             "overwrite_output_dir": True,

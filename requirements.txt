@@ -36,3 +36,7 @@ av
 librosa
 # yanked
 propcache!=0.4.0
+wandb
+questionary==2.1.1
+# grounding metrics
+vis-inference @ file:///home/stud/falu/code/vis/lib
