@@ -2,6 +2,7 @@
 """Vision-language model training orchestrator with SLURM support."""
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -31,13 +32,14 @@ class TrainingOrchestrator:
         dataset_dir: str = "/storage/user/falu/vis/processed",
         output_base: str = "/storage/user/falu/trained_models",
         hf_cache: str = "/storage/user/falu/.cache/huggingface",
-        config_output: str = "training_configs",
-        sbatch_output: str = "sbatch_scripts",
+        config_output: str = "autoconfig/configs",
+        sbatch_output: str = "autoconfig/sbatch",
         use_tokenized_cache: bool = True,
-        eval_samples: int = 500,
+        use_sampled_validation: bool = True,
         num_epochs: int = 6,
         safety_margin: float = 0.75,
         enable_gradient_checkpointing: bool = True,
+        description: Optional[str] = None,
     ):
         self.model = model
         self.dataset = dataset
@@ -51,10 +53,11 @@ class TrainingOrchestrator:
         self.config_output = Path(config_output)
         self.sbatch_output = Path(sbatch_output)
         self.use_tokenized_cache = use_tokenized_cache
-        self.eval_samples = eval_samples
+        self.use_sampled_validation = use_sampled_validation
         self.num_epochs = num_epochs
         self.safety_margin = safety_margin
         self.enable_gradient_checkpointing = enable_gradient_checkpointing
+        self.description = description
 
         self.config_output.mkdir(parents=True, exist_ok=True)
         self.sbatch_output.mkdir(parents=True, exist_ok=True)
@@ -111,20 +114,29 @@ class TrainingOrchestrator:
             output_base=self.output_base,
             hf_cache=self.hf_cache,
             use_tokenized_cache=self.use_tokenized_cache,
-            eval_samples_per_dataset=self.eval_samples,
+            use_sampled_validation=self.use_sampled_validation,
             num_epochs=self.num_epochs,
             safety_margin=self.safety_margin,
             enable_gradient_checkpointing=self.enable_gradient_checkpointing,
+            description=self.description,
         )
 
     def save_config(self, config_gen: ConfigGenerator) -> str:
         """Save configuration to YAML file."""
-        dataset_str = "_".join(config_gen.dataset_types)
-        config_name = (
-            f"{self.model}_{self.dataset}_{dataset_str}_{self.finetuning_type}.yaml"
-        )
+        # Generate config first to populate optimal hyperparameters
+        config = config_gen.generate()
+
+        # Use the run_name from the generated config as filename
+        run_name = config["run_name"]
+        config_name = f"{run_name}.yaml"
         config_path = self.config_output / config_name
-        config_gen.save(str(config_path))
+
+        # Save using the already-generated config
+        Path(config_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w") as f:
+            f.write(config_gen.to_yaml(config))
+
+        print(f"✓ Config saved to: {config_path}")
         return str(config_path)
 
     def create_sbatch(self, config_path: str) -> str:
@@ -133,7 +145,8 @@ class TrainingOrchestrator:
         sbatch_name = f"{config_stem}.sbatch"
         sbatch_path = self.sbatch_output / sbatch_name
 
-        job_name = f"train-{config_stem[:50]}"
+        # SLURM job name has length limits, but use full name for log files
+        job_name = config_stem[:50]  # SLURM has limits on job name length
         model_config = MODEL_REGISTRY.get(self.model, {})
 
         sbatch_gen = SbatchGenerator(
@@ -144,6 +157,7 @@ class TrainingOrchestrator:
             hf_cache=self.hf_cache,
             gpu_vram_gb=self.gpu_vram_gb,
             model_params_b=model_config.get("params_b", 2.0),
+            log_file_name=config_stem,  # Use full run name for log files
         )
         sbatch_gen.save(str(sbatch_path))
         return str(sbatch_path)
@@ -182,16 +196,15 @@ def main():
     parser.add_argument(
         "--output_base", type=str, default="/storage/user/falu/trained_models"
     )
-    parser.add_argument("--config_output", type=str, default="training_configs")
-    parser.add_argument("--sbatch_output", type=str, default="sbatch_scripts")
+    parser.add_argument("--config_output", type=str, default="autoconfig/configs")
+    parser.add_argument("--sbatch_output", type=str, default="autoconfig/sbatch")
     parser.add_argument(
         "--no-cache", action="store_true", help="Disable tokenized dataset caching"
     )
     parser.add_argument(
-        "--eval_samples",
-        type=int,
-        default=500,
-        help="Samples per eval dataset for fast validation during training",
+        "--no-sampled-validation",
+        action="store_true",
+        help="Use full validation set instead of sampled (all_val_sampled → all)",
     )
     parser.add_argument(
         "--num_epochs", type=int, default=6, help="Number of training epochs"
@@ -206,6 +219,12 @@ def main():
         "--no-gradient-checkpointing",
         action="store_true",
         help="Disable gradient checkpointing (uses more memory but slightly faster)",
+    )
+    parser.add_argument(
+        "--description",
+        type=str,
+        default=None,
+        help="Optional descriptive identifier for the run (e.g., 'baseline', 'test_lr', 'v2')",
     )
 
     args = parser.parse_args()
@@ -235,10 +254,11 @@ def main():
             config_output=args.config_output,
             sbatch_output=args.sbatch_output,
             use_tokenized_cache=not args.no_cache,
-            eval_samples=args.eval_samples,
+            use_sampled_validation=not args.no_sampled_validation,
             num_epochs=args.num_epochs,
             safety_margin=args.safety_margin,
             enable_gradient_checkpointing=not args.no_gradient_checkpointing,
+            description=args.description,
         )
         orchestrator.validate_inputs()
 

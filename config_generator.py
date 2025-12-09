@@ -10,6 +10,7 @@ from train_config import (
     get_finetuning_config,
     build_dataset_pairs,
     compute_optimal_config,
+    generate_run_name,
     DATASET_VALIDATION_MAP,
 )
 
@@ -29,10 +30,11 @@ class ConfigGenerator:
         output_base: str = "/storage/user/falu/trained_models",
         hf_cache: str = "/storage/user/falu/.cache/huggingface",
         use_tokenized_cache: bool = True,
-        eval_samples_per_dataset: int = 500,
+        use_sampled_validation: bool = True,
         num_epochs: int = 6,
         safety_margin: float = 0.75,
         enable_gradient_checkpointing: bool = True,
+        description: Optional[str] = None,
     ):
         self.model_key = model_key
         self.dataset_name = dataset_name
@@ -48,10 +50,11 @@ class ConfigGenerator:
         self.output_base = output_base
         self.hf_cache = hf_cache
         self.use_tokenized_cache = use_tokenized_cache
-        self.eval_samples_per_dataset = eval_samples_per_dataset
+        self.use_sampled_validation = use_sampled_validation
         self.num_epochs = num_epochs
         self.safety_margin = safety_margin
         self.enable_gradient_checkpointing = enable_gradient_checkpointing
+        self.description = description
 
         # Get model and finetuning configurations
         self.model_config = get_model_config(model_key)
@@ -65,7 +68,6 @@ class ConfigGenerator:
         # Initial optimal config (will be recomputed with dataset size)
         self.optimal = None
         self._dataset_info = None
-        self._fast_eval_info = None
 
     def _load_dataset_info(self) -> Dict[str, Any]:
         """Load dataset_info.json."""
@@ -105,31 +107,17 @@ class ConfigGenerator:
         total = sum(self._estimate_dataset_size(ds) for ds in train_datasets)
         return max(total, 1000)  # Minimum to avoid division issues
 
-    def _generate_fast_eval_datasets(
-        self, val_datasets: List[str]
-    ) -> Tuple[Dict[str, Any], List[str]]:
-        """Generate dataset_info entries for fast validation with limited samples."""
-        dataset_info = self._load_dataset_info()
-        fast_eval_info = {}
-        fast_eval_names = []
-
-        for val_ds in val_datasets:
-            if val_ds not in dataset_info:
-                continue
-
-            fast_name = f"{val_ds}_fast"
-            fast_eval_info[fast_name] = {
-                **dataset_info[val_ds],
-                "num_samples": self.eval_samples_per_dataset,
-            }
-            fast_eval_names.append(fast_name)
-
-        return fast_eval_info, fast_eval_names
-
     def _get_tokenized_path(self, dataset_str: str) -> str:
         """Get tokenized cache path based on model family and dataset."""
         family = self.model_config["family"]
-        return str(Path(self.dataset_dir) / "tokenized" / family / dataset_str)
+
+        # Use sampled validation cache for faster eval
+        if self.use_sampled_validation and dataset_str == "all":
+            cache_name = "all_val_sampled"
+        else:
+            cache_name = dataset_str
+
+        return str(Path(self.dataset_dir) / "tokenized" / family / cache_name)
 
     def _build_datasets(self) -> Tuple[List[str], List[str], str]:
         """Build train and validation dataset lists."""
@@ -170,17 +158,19 @@ class ConfigGenerator:
             enable_gradient_checkpointing=self.enable_gradient_checkpointing,
         )
 
-        # Generate fast eval dataset entries
-        self._fast_eval_info, fast_eval_names = self._generate_fast_eval_datasets(
-            val_datasets
+        # Generate concise run name for output directory
+        run_name = generate_run_name(
+            model_key=self.model_key,
+            finetuning_type=self.finetuning_type,
+            dataset_name=self.dataset_name,
+            dataset_types=self.dataset_types,
+            num_gpus=self.num_gpus,
+            gpu_vram_gb=self.gpu_vram_gb,
+            effective_batch_size=self.optimal["effective_batch_size"],
+            description=self.description,
         )
 
-        # Use fast eval datasets if available, otherwise fall back to full
-        eval_dataset_names = fast_eval_names if fast_eval_names else val_datasets
-
-        output_dir = (
-            Path(self.output_base) / self.model_key / self.finetuning_type / dataset_str
-        )
+        output_dir = Path(self.output_base) / run_name
 
         config = {
             # ====== MODEL ======
@@ -204,7 +194,7 @@ class ConfigGenerator:
             "crop_to_patches": False,
             # ====== DATASET ======
             "dataset": ",".join(train_datasets),
-            "eval_dataset": ",".join(eval_dataset_names),
+            "eval_dataset": ",".join(val_datasets),
             "eval_on_each_dataset": True,
             "dataset_dir": self.dataset_dir,
             "media_dir": str(Path(self.dataset_dir).parent),
@@ -247,7 +237,7 @@ class ConfigGenerator:
             "overwrite_output_dir": True,
             "plot_loss": True,
             "report_to": "wandb",
-            "run_name": f"{self.model_key}_{self.dataset_name}_{'_'.join(self.dataset_types)}_{datetime.now().strftime('%Y%m%d_%H%M')}",
+            "run_name": run_name,
             # ====== OPTIMIZATION ======
             "optim": "adamw_torch",
             "gradient_checkpointing": self.optimal["gradient_checkpointing"],
@@ -304,24 +294,6 @@ class ConfigGenerator:
             f.write(self.to_yaml(config))
         print(f"✓ Config saved to: {path}")
 
-        # Update dataset_info.json with fast eval entries if any
-        if self._fast_eval_info:
-            dataset_info_path = Path(self.dataset_dir) / "dataset_info.json"
-            existing = self._load_dataset_info()
-
-            # Only add new entries that don't exist
-            new_entries = {
-                k: v for k, v in self._fast_eval_info.items() if k not in existing
-            }
-
-            if new_entries:
-                existing.update(new_entries)
-                with open(dataset_info_path, "w") as f:
-                    json.dump(existing, f, indent=4)
-                print(
-                    f"✓ Added {len(new_entries)} fast eval datasets to dataset_info.json"
-                )
-
     def print_config(self) -> None:
         """Pretty print configuration with computed settings."""
         config = self.generate()
@@ -345,10 +317,13 @@ class ConfigGenerator:
             )
             print(f"  (~{evals_per_epoch} evals per epoch)")
 
-        if self._fast_eval_info:
-            print(
-                f"Fast eval: {len(self._fast_eval_info)} datasets @ {self.eval_samples_per_dataset} samples each"
-            )
+        # Show validation cache info
+        val_cache = (
+            "all_val_sampled (~1.5k samples)"
+            if self.use_sampled_validation
+            else "all (full ~18k samples)"
+        )
+        print(f"Validation cache: {val_cache}")
 
         ds = (
             "ZeRO-" + self.optimal["deepspeed_config"].split("_z")[1].split("_")[0]

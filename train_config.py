@@ -237,29 +237,46 @@ def compute_optimal_config(
         model_mem_gb = weights_mem + optimizer_mem + gradient_mem + activation_overhead
 
     elif finetuning_type == "lora":
-        # Frozen weights (bf16) + small LoRA adapters + activations
+        # Frozen weights (bf16) + small LoRA adapters + reduced activations
+        # Still need forward pass activations for long VLM sequences
         weights_mem = params_b * 2.0
         lora_mem = 0.5  # LoRA adapters are tiny
         activation_overhead = (
-            params_b * 0.3 if not enable_gradient_checkpointing else params_b * 0.15
+            params_b * 0.2 if not enable_gradient_checkpointing else params_b * 0.12
         )
         model_mem_gb = weights_mem + lora_mem + activation_overhead
 
     else:  # qlora
-        # 4-bit quantized weights + LoRA
+        # 4-bit quantized weights + LoRA + dequantization buffers
+        # Note: 4-bit needs dequant buffers for computation, not as light as it seems
         weights_mem = params_b * 0.5
         lora_mem = 0.5
+        dequant_buffers = params_b * 0.3  # Temporary fp16 buffers for computation
         activation_overhead = (
-            params_b * 0.2 if not enable_gradient_checkpointing else params_b * 0.1
+            params_b * 0.15 if not enable_gradient_checkpointing else params_b * 0.1
         )
-        model_mem_gb = weights_mem + lora_mem + activation_overhead
+        model_mem_gb = weights_mem + lora_mem + dequant_buffers + activation_overhead
 
     # Per-sample memory: VLM batches are HEAVY
     # Multi-image samples can have 10K+ tokens with attention O(n^2)
-    if enable_gradient_checkpointing:
-        mem_per_sample_gb = 2.5  # Reduced with checkpointing
-    else:
-        mem_per_sample_gb = 5.0  # Conservative for VLM
+    # LoRA/QLoRA save some memory but VLM sequences are still massive
+    if finetuning_type == "full":
+        if enable_gradient_checkpointing:
+            mem_per_sample_gb = 2.5  # Reduced with checkpointing
+        else:
+            mem_per_sample_gb = 5.0  # Conservative for VLM
+    elif finetuning_type == "lora":
+        # LoRA: frozen backbone saves gradient memory but forward activations still large
+        if enable_gradient_checkpointing:
+            mem_per_sample_gb = 1.8  # Still need activations for long sequences
+        else:
+            mem_per_sample_gb = 3.2
+    else:  # qlora
+        # QLoRA: 4-bit has dequantization overhead + VLM attention is memory-intensive
+        if enable_gradient_checkpointing:
+            mem_per_sample_gb = 2.0  # 4-bit dequant adds overhead during forward pass
+        else:
+            mem_per_sample_gb = 3.5
 
     # More conservative VRAM usage - leave room for CUDA overhead
     usable_vram = gpu_vram_gb * 0.85  # 85% max utilization
@@ -292,16 +309,32 @@ def compute_optimal_config(
     safe_batch_mem = available_for_batch * safety_margin
     max_batch_size = max(1, int(safe_batch_mem / mem_per_sample_gb))
 
-    # Cap based on model size to avoid OOM spikes
+    # Cap based on model size and finetuning type to avoid OOM spikes
+    # VLM sequences are long (image patches), so caps are conservative even for LoRA/QLoRA
     if finetuning_type == "full":
+        # Full finetuning is memory-intensive, be conservative
         if params_b >= 20:
             batch_size = min(max_batch_size, 2)  # Very conservative for large models
         elif params_b >= 8:
             batch_size = min(max_batch_size, 4)
         else:
             batch_size = min(max_batch_size, 6)
-    else:  # LoRA/QLoRA can handle larger batches
-        batch_size = min(max_batch_size, 8)
+    elif finetuning_type == "lora":
+        # LoRA is lighter but VLM attention is still heavy
+        if params_b >= 20:
+            batch_size = min(max_batch_size, 6)
+        elif params_b >= 8:
+            batch_size = min(max_batch_size, 10)
+        else:
+            batch_size = min(max_batch_size, 14)
+    else:  # qlora
+        # QLoRA: 4-bit dequant overhead means similar memory to LoRA for VLMs
+        if params_b >= 20:
+            batch_size = min(max_batch_size, 5)
+        elif params_b >= 8:
+            batch_size = min(max_batch_size, 8)
+        else:
+            batch_size = min(max_batch_size, 10)
 
     batch_size = max(1, batch_size)
 
@@ -326,12 +359,13 @@ def compute_optimal_config(
         steps_per_epoch = max(1, total_train_samples // effective_batch)
         total_steps = steps_per_epoch * num_epochs
 
-        # Target ~3-4 evals per epoch for good feedback, minimum 100 steps
-        evals_per_epoch = 8
-        eval_steps = max(100, steps_per_epoch // evals_per_epoch)
+        # With fast sampled validation, we can eval much more frequently
+        # Target ~15-20 evals per epoch for rapid feedback, minimum 50 steps
+        evals_per_epoch = 20
+        eval_steps = max(50, steps_per_epoch // evals_per_epoch)
 
-        # Save checkpoints less frequently (~2 per epoch)
-        save_steps = max(eval_steps * 2, steps_per_epoch // 2)
+        # Save checkpoints less frequently (every 4-5 evals, ~4 saves per epoch)
+        save_steps = max(eval_steps * 4, steps_per_epoch // 4)
     else:
         # Fallback to fractional (legacy behavior)
         if params_b < 5:
@@ -435,3 +469,67 @@ def list_available_datasets() -> str:
             dataset_name = parts[0]
         datasets.add(dataset_name)
     return "Available datasets:\n  " + "\n  ".join(sorted(datasets))
+
+
+def generate_run_name(
+    model_key: str,
+    finetuning_type: str,
+    dataset_name: str,
+    dataset_types: List[str],
+    num_gpus: int,
+    gpu_vram_gb: int,
+    effective_batch_size: int,
+    description: Optional[str] = None,
+) -> str:
+    """
+    Generate concise, informative run name for WandB and SLURM.
+
+    Format with description: {model}-{desc}-{ft}-{dataset}-{gpus}x{vram}GB-b{batch}
+    Format without: {model}-{ft}-{dataset}-{gpus}x{vram}GB-b{batch}
+
+    Examples:
+        - internvl3_1b-baseline-full-all-1x48GB-b32
+        - qwen3_vl_8b-lora-OVIS-4x48GB-b64
+        - internvl3_1b-full-all-si-1x48GB-b32  (single_image only)
+    """
+    # Dataset suffix if not using all types
+    all_types = ["single_image", "multi_image_single_turn", "multi_image_multi_turn"]
+    if set(dataset_types) == set(all_types):
+        ds_suffix = ""
+    elif len(dataset_types) == 1:
+        type_map = {
+            "single_image": "si",
+            "multi_image_single_turn": "mist",
+            "multi_image_multi_turn": "mimt",
+        }
+        ds_suffix = f"-{type_map.get(dataset_types[0], dataset_types[0])}"
+    else:
+        # Multiple but not all types
+        type_map = {
+            "single_image": "si",
+            "multi_image_single_turn": "mist",
+            "multi_image_multi_turn": "mimt",
+        }
+        abbrevs = [type_map.get(dt, dt[:4]) for dt in dataset_types]
+        ds_suffix = f"-{'+'.join(abbrevs)}"
+
+    # Shorten finetuning type
+    ft_map = {"full": "full", "lora": "lora", "qlora": "qlora"}
+    ft_short = ft_map.get(finetuning_type, finetuning_type)
+
+    # Build name components
+    parts = [model_key]
+
+    if description:
+        parts.append(description)
+
+    parts.extend(
+        [
+            ft_short,
+            f"{dataset_name}{ds_suffix}",
+            f"{num_gpus}x{gpu_vram_gb}GB",
+            f"b{effective_batch_size}",
+        ]
+    )
+
+    return "-".join(parts)

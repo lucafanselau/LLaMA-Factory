@@ -72,6 +72,10 @@ def run_sft(
             model, "_hf_peft_config_loaded", True
         )  # hack here: make model compatible with prediction
 
+    # Set left-padding for generation tasks (needed during eval if predict_with_generate is enabled)
+    if training_args.predict_with_generate:
+        tokenizer.padding_side = "left"
+
     data_collator = SFTDataCollatorWith4DAttentionMask(
         template=template,
         model=model if not training_args.predict_with_generate else None,
@@ -163,9 +167,6 @@ def run_sft(
                     keys += ["eval_loss", "eval_accuracy"]
 
             plot_loss(training_args.output_dir, keys=keys)
-
-    if training_args.predict_with_generate:
-        tokenizer.padding_side = "left"  # use left-padding in generation
 
     # Evaluation
     if training_args.do_eval:

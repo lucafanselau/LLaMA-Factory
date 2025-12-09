@@ -21,6 +21,7 @@ class SbatchGenerator:
         output_dir: str = "/usr/stud/falu/code/LLaMA-Factory/logs",
         hf_cache: str = "/storage/user/falu/.cache/huggingface",
         model_params_b: float = 2.0,
+        log_file_name: Optional[str] = None,
     ):
         """
         Initialize sbatch generator.
@@ -29,7 +30,7 @@ class SbatchGenerator:
             config_path: Path to YAML config file
             num_gpus: Number of GPUs to allocate
             num_nodes: Number of compute nodes
-            job_name: SLURM job name
+            job_name: SLURM job name (may be truncated for SLURM limits)
             time_hours: Maximum runtime (auto-calculated if None)
             gpu_vram_gb: GPU VRAM in GB (for resource request)
             cpus_per_gpu: CPU cores per GPU
@@ -37,6 +38,7 @@ class SbatchGenerator:
             output_dir: Directory for SLURM logs
             hf_cache: Hugging Face cache directory
             model_params_b: Model size in billions (for time estimation)
+            log_file_name: Full run name for log file (defaults to job_name if None)
         """
         self.config_path = config_path
         self.num_gpus = num_gpus
@@ -51,6 +53,7 @@ class SbatchGenerator:
             config_stem = Path(config_path).stem
             job_name = f"train-{config_stem}"
         self.job_name = job_name
+        self.log_file_name = log_file_name or job_name
 
         self.time_hours = time_hours or self._estimate_time()
         self.cpus_per_gpu = cpus_per_gpu
@@ -74,7 +77,8 @@ class SbatchGenerator:
     def generate(self) -> str:
         """Generate the sbatch script content."""
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
-        log_file = f"{self.output_dir}/train-%j.out"
+        # Use full run name in log file for better identification
+        log_file = f"{self.output_dir}/{self.log_file_name}-%j.out"
 
         days = self.time_hours // 24
         hours = self.time_hours % 24
