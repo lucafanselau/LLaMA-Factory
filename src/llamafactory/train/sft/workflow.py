@@ -97,10 +97,7 @@ def run_sft(
     metric_module = {}
     if training_args.predict_with_generate:
         if finetuning_args.compute_grounding_iou:
-            metric_module["compute_metrics"] = ComputeGroundingIoU(
-                tokenizer=tokenizer,
-                model_family=finetuning_args.grounding_model_family,
-            )
+            metric_module["compute_metrics"] = ComputeGroundingIoU(tokenizer=tokenizer)
         else:
             metric_module["compute_metrics"] = ComputeSimilarity(tokenizer=tokenizer)
     elif finetuning_args.compute_accuracy:
@@ -147,7 +144,7 @@ def run_sft(
                 if finetuning_args.compute_grounding_iou:
                     keys += sum(
                         [
-                            [f"eval_{key}_loss", f"eval_{key}_iou_accuracy"]
+                            [f"eval_{key}_iou_accuracy", f"eval_{key}_num_gt_boxes"]
                             for key in dataset_module["eval_dataset"].keys()
                         ],
                         [],
@@ -162,7 +159,7 @@ def run_sft(
                     )
             else:
                 if finetuning_args.compute_grounding_iou:
-                    keys += ["eval_loss", "eval_iou_accuracy"]
+                    keys += ["eval_iou_accuracy", "eval_num_gt_boxes"]
                 else:
                     keys += ["eval_loss", "eval_accuracy"]
 

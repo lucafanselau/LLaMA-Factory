@@ -572,12 +572,6 @@ class FinetuningArguments(
             "help": "Whether or not to compute grounding IoU metric at evaluation (requires predict_with_generate)."
         },
     )
-    grounding_model_family: str = field(
-        default="qwen3",
-        metadata={
-            "help": "Model family for grounding output parsing (qwen3, internvl3)."
-        },
-    )
     disable_shuffling: bool = field(
         default=False,
         metadata={

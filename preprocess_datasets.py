@@ -19,7 +19,7 @@ DATASET_TYPES = ["single_image", "multi_image_single_turn", "multi_image_multi_t
 
 CONFIG_DIR = Path("preprocessing_configs")
 SBATCH_DIR = Path("preprocessing_sbatch")
-DATASET_DIR = "/storage/user/falu/vis/processed"
+DATASET_DIR = "/storage/user/falu/vis/processed_llamafactory"
 HF_CACHE = "/storage/user/falu/.cache/huggingface"
 
 PREPROCESSING_NUM_WORKERS = 32
@@ -64,9 +64,9 @@ def generate_config(family: str, dataset_name: str, dataset_types: list[str]) ->
         stage: sft
         do_train: false
 
-        image_max_pixels: 196608
-        image_min_pixels: 512
-        video_max_pixels: 16384
+        image_max_pixels: 589824
+        image_min_pixels: 1024
+        video_max_pixels: 65536
         video_min_pixels: 256
         
         dataset: {','.join(train_ds)}
@@ -76,6 +76,7 @@ def generate_config(family: str, dataset_name: str, dataset_types: list[str]) ->
         media_dir: {Path(DATASET_DIR).parent}
         cutoff_len: 8192
         overwrite_cache: true
+        use_fast_tokenizer: true
         preprocessing_num_workers: {PREPROCESSING_NUM_WORKERS}
         
         tokenized_path: {tokenized_path}

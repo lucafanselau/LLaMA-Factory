@@ -7,7 +7,7 @@ import numpy as np
 
 TOKENIZED_BASE = Path("/storage/user/falu/vis/processed/tokenized")
 FAMILIES = ["qwen3", "internvl3"]
-TOTAL_EVAL_SAMPLES = 768 * 2  # ~128 per dataset × 12 datasets
+TOTAL_EVAL_SAMPLES = 768 * 8  # ~128 per dataset × 12 datasets
 SEED = 42
 
 

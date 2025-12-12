@@ -26,15 +26,15 @@ class ConfigGenerator:
         dataset_types: Optional[List[str]] = None,
         num_gpus: int = 1,
         gpu_vram_gb: int = 48,
-        dataset_dir: str = "/storage/user/falu/vis/processed",
+        dataset_dir: str = "/storage/user/falu/vis/processed_llamafactory",
         output_base: str = "/storage/user/falu/trained_models",
         hf_cache: str = "/storage/user/falu/.cache/huggingface",
         use_tokenized_cache: bool = True,
-        use_sampled_validation: bool = True,
         num_epochs: int = 6,
         safety_margin: float = 0.75,
         enable_gradient_checkpointing: bool = True,
         description: Optional[str] = None,
+        optimizer: Optional[str] = None,
     ):
         self.model_key = model_key
         self.dataset_name = dataset_name
@@ -50,11 +50,11 @@ class ConfigGenerator:
         self.output_base = output_base
         self.hf_cache = hf_cache
         self.use_tokenized_cache = use_tokenized_cache
-        self.use_sampled_validation = use_sampled_validation
         self.num_epochs = num_epochs
         self.safety_margin = safety_margin
         self.enable_gradient_checkpointing = enable_gradient_checkpointing
         self.description = description
+        self.optimizer = optimizer
 
         # Get model and finetuning configurations
         self.model_config = get_model_config(model_key)
@@ -111,13 +111,7 @@ class ConfigGenerator:
         """Get tokenized cache path based on model family and dataset."""
         family = self.model_config["family"]
 
-        # Use sampled validation cache for faster eval
-        if self.use_sampled_validation and dataset_str == "all":
-            cache_name = "all_val_sampled"
-        else:
-            cache_name = dataset_str
-
-        return str(Path(self.dataset_dir) / "tokenized" / family / cache_name)
+        return str(Path(self.dataset_dir) / "tokenized" / family / "all")
 
     def _build_datasets(self) -> Tuple[List[str], List[str], str]:
         """Build train and validation dataset lists."""
@@ -187,9 +181,10 @@ class ConfigGenerator:
                 "freeze_multi_modal_projector"
             ],
             "freeze_language_model": self.finetune_config["freeze_language_model"],
-            "image_max_pixels": 196608,
-            "image_min_pixels": 512,
-            "video_max_pixels": 16384,
+            # Lower resolution for full finetuning to reduce activation memory
+            "image_max_pixels": 589824,
+            "image_min_pixels": 1024,
+            "video_max_pixels": 65536,
             "video_min_pixels": 256,
             "crop_to_patches": False,
             # ====== DATASET ======
@@ -218,6 +213,7 @@ class ConfigGenerator:
             "num_train_epochs": self.optimal["num_epochs"],
             "lr_scheduler_type": "cosine",
             "warmup_ratio": 0.1,
+            "flash_attn": "auto",
             "bf16": True,
             "ddp_timeout": 180000000,
             "max_grad_norm": 1.0,
@@ -229,9 +225,8 @@ class ConfigGenerator:
             "logging_steps": 10,
             "log_level": "info",
             # ====== GROUNDING METRICS ======
-            "predict_with_generate": True,
-            "compute_grounding_iou": True,
-            "grounding_model_family": self.model_config["family"],
+            # "predict_with_generate": True,
+            # "compute_grounding_iou": True,
             # ====== OUTPUT ======
             "save_only_model": False,
             "overwrite_output_dir": True,
@@ -240,6 +235,7 @@ class ConfigGenerator:
             "run_name": run_name,
             # ====== OPTIMIZATION ======
             "optim": "adamw_torch",
+            "flash_attn": "auto",
             "gradient_checkpointing": self.optimal["gradient_checkpointing"],
             "resume_from_checkpoint": None,
         }

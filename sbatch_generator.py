@@ -125,7 +125,7 @@ class SbatchGenerator:
                 export NNODES={self.num_nodes}
                 export NODE_RANK=0
                 export MASTER_ADDR=${{SLURM_NODELIST%%,*}}
-                export MASTER_PORT=29500
+                export MASTER_PORT=29501
                 
                 echo "GPUs/node: ${{NPROC_PER_NODE}}, Nodes: ${{NNODES}}"
             """

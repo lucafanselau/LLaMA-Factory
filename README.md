@@ -183,7 +183,7 @@ python train_mllm.py --model qwen3_vl_8b --dataset OVIS --finetuning_type qlora 
 └── sbatch_scripts/            # Generated SLURM scripts
 
 Data:
-/storage/user/falu/vis/processed/dataset_info.json  # Dataset registry
+/storage/user/falu/vis/processed_llamafactory/dataset_info.json  # Dataset registry
 /storage/user/falu/.cache/huggingface/               # Model cache
 
 Output:

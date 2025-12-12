@@ -292,15 +292,6 @@ def configure_job() -> dict | None:
         return None
 
     # Validation cache selection
-    use_sampled_validation = questionary.confirm(
-        "Use sampled validation cache (all_val_sampled)? Faster eval, ~1.5k samples",
-        default=True,
-        style=custom_style,
-    ).ask()
-
-    if use_sampled_validation is None:
-        return None
-
     # Optional description for better run tracking
     description = questionary.text(
         "Description (optional, e.g., 'baseline', 'test_lr', 'v2'):",
@@ -324,7 +315,6 @@ def configure_job() -> dict | None:
         "num_epochs": int(num_epochs),
         "safety_margin": float(safety_margin),
         "gradient_checkpointing": gradient_checkpointing,
-        "use_sampled_validation": use_sampled_validation,
         "description": description,
     }
 
@@ -341,7 +331,6 @@ def create_config_generator(config: dict) -> ConfigGenerator:
         num_epochs=config["num_epochs"],
         safety_margin=config.get("safety_margin", 0.75),
         enable_gradient_checkpointing=config.get("gradient_checkpointing", True),
-        use_sampled_validation=config.get("use_sampled_validation", True),
         description=config.get("description"),
     )
 
@@ -402,9 +391,6 @@ def submit_job(config: dict) -> None:
 
     if not config.get("gradient_checkpointing", True):
         cmd.append("--no-gradient-checkpointing")
-
-    if not config.get("use_sampled_validation", True):
-        cmd.append("--no-sampled-validation")
 
     # Ask whether to submit or just generate
     submit_action = questionary.select(

@@ -6,20 +6,21 @@ trust_remote_code: true
 stage: sft
 do_train: false
 
-image_max_pixels: 196608
-image_min_pixels: 512
-video_max_pixels: 16384
+image_max_pixels: 589824
+image_min_pixels: 1024
+video_max_pixels: 65536
 video_min_pixels: 256
 
 dataset: OVIS_train_internvl3_single_image,OVIS_train_internvl3_multi_image_single_turn,OVIS_train_internvl3_multi_image_multi_turn,LVVis_train_internvl3_single_image,LVVis_train_internvl3_multi_image_single_turn,LVVis_train_internvl3_multi_image_multi_turn,Youtube-VIS-2021_train_internvl3_single_image,Youtube-VIS-2021_train_internvl3_multi_image_single_turn,Youtube-VIS-2021_train_internvl3_multi_image_multi_turn,Youtube-VIS-2022_train_internvl3_single_image,Youtube-VIS-2022_train_internvl3_multi_image_single_turn,Youtube-VIS-2022_train_internvl3_multi_image_multi_turn
 eval_dataset: OVIS_val_internvl3_single_image,OVIS_val_internvl3_multi_image_single_turn,OVIS_val_internvl3_multi_image_multi_turn,LVVis_val_internvl3_single_image,LVVis_val_internvl3_multi_image_single_turn,LVVis_val_internvl3_multi_image_multi_turn,Youtube-VIS-2021_val_internvl3_single_image,Youtube-VIS-2021_val_internvl3_multi_image_single_turn,Youtube-VIS-2021_val_internvl3_multi_image_multi_turn,Youtube-VIS-2022_val_internvl3_single_image,Youtube-VIS-2022_val_internvl3_multi_image_single_turn,Youtube-VIS-2022_val_internvl3_multi_image_multi_turn
 
-dataset_dir: /storage/user/falu/vis/processed
+dataset_dir: /storage/user/falu/vis/processed_llamafactory
 media_dir: /storage/user/falu/vis
 cutoff_len: 8192
 overwrite_cache: true
+use_fast_tokenizer: true
 preprocessing_num_workers: 32
 
-tokenized_path: /storage/user/falu/vis/processed/tokenized/internvl3/all
+tokenized_path: /storage/user/falu/vis/processed_llamafactory/tokenized/internvl3/all
 
 output_dir: /tmp/preprocess_internvl3_all

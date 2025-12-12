@@ -46,8 +46,6 @@ if is_rouge_available():
 
 # Grounding IoU metric dependencies
 try:
-    from vis_inference import BoundingBox, MODEL_ADAPTERS
-    from vis_inference.adapters import ModelAdapter
     from scipy.optimize import linear_sum_assignment
 
     _grounding_available = True
@@ -164,29 +162,58 @@ class ComputeSimilarity:
             return self._dump()
 
 
+def parse_boxes_from_text(text: str) -> list[tuple[float, float, float, float]]:
+    r"""Extract bounding boxes from text by finding sequences of 4 numbers.
+
+    Handles various formats by extracting all numbers and grouping by 4:
+    - JSON: [100, 200, 300, 400]
+    - Comma-separated: 100, 200, 300, 400
+    - Multiple boxes: [[100,200,300,400],[500,600,700,800]]
+
+    Returns:
+        List of (x1, y1, x2, y2) tuples in normalized 0-1000 scale
+    """
+    import re
+
+    # Find all standalone numbers (not part of words like "bbox_2d")
+    # Use negative lookbehind to avoid matching digits inside identifiers
+    numbers = re.findall(r"(?<![a-zA-Z_])\d+\.?\d*", text)
+    numbers = [float(n) for n in numbers]
+
+    # Group into sets of 4 consecutive numbers
+    boxes = []
+    for i in range(0, len(numbers) - 3, 4):
+        x1, y1, x2, y2 = numbers[i : i + 4]
+        # Sanity check: x2 > x1 and y2 > y1, and values in reasonable range
+        if x2 > x1 and y2 > y1 and all(0 <= v <= 1000 for v in [x1, y1, x2, y2]):
+            boxes.append((x1, y1, x2, y2))
+
+    return boxes
+
+
 def compute_iou_loss(
-    gt_boxes: list["BoundingBox"], pred_boxes: list["BoundingBox"]
+    gt_boxes: list[tuple[float, float, float, float]],
+    pred_boxes: list[tuple[float, float, float, float]],
 ) -> float:
     r"""Compute bipartite matching IoU loss.
+
+    Args:
+        gt_boxes: List of (x1, y1, x2, y2) tuples
+        pred_boxes: List of (x1, y1, x2, y2) tuples
 
     Returns:
         Loss in [0, 1] where 0 = perfect match, 1 = no match.
     """
     if not _grounding_available:
-        raise ImportError("vis_inference is required for grounding IoU metric")
+        raise ImportError("scipy is required for grounding IoU metric")
 
     if len(gt_boxes) == 0 and len(pred_boxes) == 0:
         return 0.0
     if len(gt_boxes) == 0 or len(pred_boxes) == 0:
         return 1.0
 
-    def box_to_tensor(boxes):
-        return torch.tensor(
-            [[b.x1, b.y1, b.x2, b.y2] for b in boxes], dtype=torch.float32
-        )
-
-    gt_t = box_to_tensor(gt_boxes)
-    pred_t = box_to_tensor(pred_boxes)
+    gt_t = torch.tensor(gt_boxes, dtype=torch.float32)
+    pred_t = torch.tensor(pred_boxes, dtype=torch.float32)
 
     # Compute IoU matrix
     area_gt = (gt_t[:, 2] - gt_t[:, 0]) * (gt_t[:, 3] - gt_t[:, 1])
@@ -214,11 +241,14 @@ def compute_iou_loss(
 
 @dataclass
 class ComputeGroundingIoU:
-    r"""Compute grounding IoU metric for visual grounding tasks."""
+    r"""Compute grounding IoU metric for visual grounding tasks.
+
+    Also computes standard token accuracy for train/val loss comparison.
+    Extracts bounding boxes from text by finding sequences of 4 numbers.
+    Works with any format (JSON, comma-separated, etc).
+    """
 
     tokenizer: "PreTrainedTokenizer"
-    model_family: str = "qwen3"
-    image_size: tuple[int, int] = (1000, 1000)
 
     def _dump(self) -> Optional[dict[str, float]]:
         result = None
@@ -231,21 +261,14 @@ class ComputeGroundingIoU:
             "iou_accuracy": [],
             "num_gt_boxes": [],
             "num_pred_boxes": [],
-            "parse_success_rate": [],
         }
         return result
 
     def __post_init__(self):
         if not _grounding_available:
             raise ImportError(
-                "vis_inference is required for grounding IoU metric. "
-                "Install it with: pip install vis-inference"
-            )
-
-        self.adapter: "ModelAdapter" = MODEL_ADAPTERS.get(self.model_family)
-        if self.adapter is None:
-            raise ValueError(
-                f"Unknown model family: {self.model_family}. Available: {list(MODEL_ADAPTERS.keys())}"
+                "scipy is required for grounding IoU metric. "
+                "Run: uv sync --extra torch --extra metrics --prerelease=allow"
             )
         self._dump()
 
@@ -254,33 +277,31 @@ class ComputeGroundingIoU:
     ) -> Optional[dict[str, float]]:
         preds, labels = numpify(eval_preds.predictions), numpify(eval_preds.label_ids)
 
-        # Decode predictions and labels
-        preds = np.where(preds != IGNORE_INDEX, preds, self.tokenizer.pad_token_id)
-        labels = np.where(labels != IGNORE_INDEX, labels, self.tokenizer.pad_token_id)
+        # Decode predictions and labels for IoU
+        preds_for_decode = np.where(
+            preds != IGNORE_INDEX, preds, self.tokenizer.pad_token_id
+        )
+        labels_for_decode = np.where(
+            labels != IGNORE_INDEX, labels, self.tokenizer.pad_token_id
+        )
 
-        decoded_preds = self.tokenizer.batch_decode(preds, skip_special_tokens=True)
-        decoded_labels = self.tokenizer.batch_decode(labels, skip_special_tokens=True)
+        decoded_preds = self.tokenizer.batch_decode(
+            preds_for_decode, skip_special_tokens=True
+        )
+        decoded_labels = self.tokenizer.batch_decode(
+            labels_for_decode, skip_special_tokens=True
+        )
 
         for pred_text, label_text in zip(decoded_preds, decoded_labels):
-            try:
-                gt_prims = self.adapter.parse_response(label_text, self.image_size)
-                pred_prims = self.adapter.parse_response(pred_text, self.image_size)
+            # Parse boxes from text (robust to any format)
+            gt_boxes = parse_boxes_from_text(label_text)
+            pred_boxes = parse_boxes_from_text(pred_text)
 
-                gt_boxes = [p for p in gt_prims if isinstance(p, BoundingBox)]
-                pred_boxes = [p for p in pred_prims if isinstance(p, BoundingBox)]
+            iou_loss = compute_iou_loss(gt_boxes, pred_boxes)
 
-                loss = compute_iou_loss(gt_boxes, pred_boxes)
-
-                self.score_dict["iou_accuracy"].append(1.0 - loss)
-                self.score_dict["num_gt_boxes"].append(len(gt_boxes))
-                self.score_dict["num_pred_boxes"].append(len(pred_boxes))
-                self.score_dict["parse_success_rate"].append(1.0)
-            except Exception:
-                # Parsing failed - count as failure
-                self.score_dict["iou_accuracy"].append(0.0)
-                self.score_dict["num_gt_boxes"].append(0)
-                self.score_dict["num_pred_boxes"].append(0)
-                self.score_dict["parse_success_rate"].append(0.0)
+            self.score_dict["iou_accuracy"].append(1.0 - iou_loss)
+            self.score_dict["num_gt_boxes"].append(len(gt_boxes))
+            self.score_dict["num_pred_boxes"].append(len(pred_boxes))
 
         if compute_result:
             return self._dump()

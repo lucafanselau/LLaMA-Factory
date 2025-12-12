@@ -29,17 +29,17 @@ class TrainingOrchestrator:
         dataset_types: Optional[List[str]] = None,
         num_gpus: int = 1,
         gpu_vram_gb: int = 48,
-        dataset_dir: str = "/storage/user/falu/vis/processed",
+        dataset_dir: str = "/storage/user/falu/vis/processed_llamafactory",
         output_base: str = "/storage/user/falu/trained_models",
         hf_cache: str = "/storage/user/falu/.cache/huggingface",
         config_output: str = "autoconfig/configs",
         sbatch_output: str = "autoconfig/sbatch",
         use_tokenized_cache: bool = True,
-        use_sampled_validation: bool = True,
         num_epochs: int = 6,
         safety_margin: float = 0.75,
         enable_gradient_checkpointing: bool = True,
         description: Optional[str] = None,
+        optimizer: Optional[str] = None,
     ):
         self.model = model
         self.dataset = dataset
@@ -53,11 +53,11 @@ class TrainingOrchestrator:
         self.config_output = Path(config_output)
         self.sbatch_output = Path(sbatch_output)
         self.use_tokenized_cache = use_tokenized_cache
-        self.use_sampled_validation = use_sampled_validation
         self.num_epochs = num_epochs
         self.safety_margin = safety_margin
         self.enable_gradient_checkpointing = enable_gradient_checkpointing
         self.description = description
+        self.optimizer = optimizer
 
         self.config_output.mkdir(parents=True, exist_ok=True)
         self.sbatch_output.mkdir(parents=True, exist_ok=True)
@@ -114,11 +114,11 @@ class TrainingOrchestrator:
             output_base=self.output_base,
             hf_cache=self.hf_cache,
             use_tokenized_cache=self.use_tokenized_cache,
-            use_sampled_validation=self.use_sampled_validation,
             num_epochs=self.num_epochs,
             safety_margin=self.safety_margin,
             enable_gradient_checkpointing=self.enable_gradient_checkpointing,
             description=self.description,
+            optimizer=self.optimizer,
         )
 
     def save_config(self, config_gen: ConfigGenerator) -> str:
@@ -191,7 +191,9 @@ def main():
     )
     parser.add_argument("--list_datasets", action="store_true", help="List datasets")
     parser.add_argument(
-        "--dataset_dir", type=str, default="/storage/user/falu/vis/processed"
+        "--dataset_dir",
+        type=str,
+        default="/storage/user/falu/vis/processed_llamafactory",
     )
     parser.add_argument(
         "--output_base", type=str, default="/storage/user/falu/trained_models"
@@ -200,11 +202,6 @@ def main():
     parser.add_argument("--sbatch_output", type=str, default="autoconfig/sbatch")
     parser.add_argument(
         "--no-cache", action="store_true", help="Disable tokenized dataset caching"
-    )
-    parser.add_argument(
-        "--no-sampled-validation",
-        action="store_true",
-        help="Use full validation set instead of sampled (all_val_sampled → all)",
     )
     parser.add_argument(
         "--num_epochs", type=int, default=6, help="Number of training epochs"
@@ -225,6 +222,13 @@ def main():
         type=str,
         default=None,
         help="Optional descriptive identifier for the run (e.g., 'baseline', 'test_lr', 'v2')",
+    )
+    parser.add_argument(
+        "--optimizer",
+        type=str,
+        default=None,
+        choices=["adamw_torch", "adamw_bnb_8bit", "adamw_8bit", "adafactor"],
+        help="Override optimizer (default: auto-select based on finetuning type)",
     )
 
     args = parser.parse_args()
@@ -254,11 +258,11 @@ def main():
             config_output=args.config_output,
             sbatch_output=args.sbatch_output,
             use_tokenized_cache=not args.no_cache,
-            use_sampled_validation=not args.no_sampled_validation,
             num_epochs=args.num_epochs,
             safety_margin=args.safety_margin,
             enable_gradient_checkpointing=not args.no_gradient_checkpointing,
             description=args.description,
+            optimizer=args.optimizer,
         )
         orchestrator.validate_inputs()
 

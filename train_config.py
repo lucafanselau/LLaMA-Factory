@@ -148,9 +148,9 @@ FINETUNING_CONFIGS = {
         "freeze_multi_modal_projector": True,
         "freeze_language_model": False,
         "lora_rank": 8,
-        "lora_alpha": 16,
-        "lora_dropout": 0.1,
-        "lora_target": "q_proj,v_proj",
+        "lora_alpha": 17,
+        "lora_dropout": 0.0,
+        "lora_target": "all",
         "quantization_bit": None,
     },
     "qlora": {
@@ -220,8 +220,9 @@ def compute_optimal_config(
         # Base model memory (weights in bf16)
         weights_mem = params_b * 2.0
 
-        # Optimizer states (AdamW: 2 states * 4 bytes each for active params)
-        optimizer_mem = active_params_b * 8.0
+        # Optimizer states (8-bit AdamW: 2 states * 1 byte each for active params)
+        # Using 8-bit optimizer saves ~6GB per billion params vs fp32 Adam
+        optimizer_mem = active_params_b * 2.0
 
         # Gradients (bf16 for active params)
         gradient_mem = active_params_b * 2.0
@@ -260,11 +261,12 @@ def compute_optimal_config(
     # Per-sample memory: VLM batches are HEAVY
     # Multi-image samples can have 10K+ tokens with attention O(n^2)
     # LoRA/QLoRA save some memory but VLM sequences are still massive
+    # With 8-bit optimizer + reduced resolution, we can be slightly less conservative
     if finetuning_type == "full":
         if enable_gradient_checkpointing:
-            mem_per_sample_gb = 2.5  # Reduced with checkpointing
+            mem_per_sample_gb = 2.0  # With 8-bit Adam + lower res + checkpointing
         else:
-            mem_per_sample_gb = 5.0  # Conservative for VLM
+            mem_per_sample_gb = 4.5  # Conservative for VLM without checkpointing
     elif finetuning_type == "lora":
         # LoRA: frozen backbone saves gradient memory but forward activations still large
         if enable_gradient_checkpointing:
@@ -288,14 +290,15 @@ def compute_optimal_config(
         effective_model_mem = model_mem_gb
     elif model_mem_gb > usable_vram:
         if model_mem_gb > total_vram * 0.8:  # Need ZeRO-3
-            deepspeed_config = DEEPSPEED_CONFIGS["z3"]
+            deepspeed_config = DEEPSPEED_CONFIGS["z2"]
             effective_model_mem = model_mem_gb / num_gpus
         else:  # ZeRO-2 sufficient
             deepspeed_config = DEEPSPEED_CONFIGS["z2"]
             weights_mem = params_b * 2
             trainable_mem = (model_mem_gb - weights_mem) / num_gpus
             effective_model_mem = weights_mem + trainable_mem
-    elif num_gpus > 1 and params_b > 15 and finetuning_type == "full":
+    elif num_gpus > 1 and finetuning_type == "full":
+        # Always use ZeRO-2 for multi-GPU full finetuning to distribute optimizer states
         deepspeed_config = DEEPSPEED_CONFIGS["z2"]
         weights_mem = params_b * 2
         trainable_mem = (model_mem_gb - weights_mem) / num_gpus
@@ -320,13 +323,13 @@ def compute_optimal_config(
         else:
             batch_size = min(max_batch_size, 6)
     elif finetuning_type == "lora":
-        # LoRA is lighter but VLM attention is still heavy
+        # LoRA is lighter but VLM attention is still heavy, especially at high-res
         if params_b >= 20:
-            batch_size = min(max_batch_size, 6)
+            batch_size = min(max_batch_size, 4)
         elif params_b >= 8:
-            batch_size = min(max_batch_size, 10)
+            batch_size = min(max_batch_size, 6)
         else:
-            batch_size = min(max_batch_size, 14)
+            batch_size = min(max_batch_size, 8)
     else:  # qlora
         # QLoRA: 4-bit dequant overhead means similar memory to LoRA for VLMs
         if params_b >= 20:
@@ -348,24 +351,30 @@ def compute_optimal_config(
 
     # Learning rate with sqrt scaling
     effective_batch = batch_size * num_gpus * grad_accum
-    lr = 2e-5 * (effective_batch / 32) ** 0.5
-    lr = max(5e-6, min(lr, 1e-4))
+    # Use higher base LR for LoRA (empirically better for adapter training)
+    if finetuning_type in ["lora", "qlora"]:
+        lr = 6e-5 * (effective_batch / 32) ** 0.5
+    else:
+        lr = 6e-6 * (effective_batch / 32) ** 0.5
+    lr = max(5e-7, min(lr, 1e-4))
 
     dataloader_workers = min(8, max(4, batch_size * 2))
     preproc_workers = min(64, max(16, num_gpus * 16))
 
     # Compute eval/save steps - absolute if dataset size known, else fractional
     if total_train_samples is not None:
-        steps_per_epoch = max(1, total_train_samples // effective_batch)
+        steps_per_epoch = max(1, total_train_samples // effective_batch) * num_gpus
         total_steps = steps_per_epoch * num_epochs
 
         # With fast sampled validation, we can eval much more frequently
         # Target ~15-20 evals per epoch for rapid feedback, minimum 50 steps
-        evals_per_epoch = 20
+        evals_per_epoch = 6
         eval_steps = max(50, steps_per_epoch // evals_per_epoch)
 
-        # Save checkpoints less frequently (every 4-5 evals, ~4 saves per epoch)
-        save_steps = max(eval_steps * 4, steps_per_epoch // 4)
+        # save at every eval for lora, qlora, otherwise save at every 4 evals
+        save_steps = (
+            eval_steps if finetuning_type in ["lora", "qlora"] else eval_steps * 4
+        )
     else:
         # Fallback to fractional (legacy behavior)
         if params_b < 5:

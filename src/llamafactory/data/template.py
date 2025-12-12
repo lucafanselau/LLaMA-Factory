@@ -80,7 +80,10 @@ class Template:
     ) -> list[tuple[list[int], list[int]]]:
         r"""Return multiple pairs of token ids representing prompts and responses respectively."""
         encoded_messages = self._encode(tokenizer, messages, system, tools)
-        return [(encoded_messages[i], encoded_messages[i + 1]) for i in range(0, len(encoded_messages), 2)]
+        return [
+            (encoded_messages[i], encoded_messages[i + 1])
+            for i in range(0, len(encoded_messages), 2)
+        ]
 
     def extract_tool(self, content: str) -> Union[str, list["FunctionCall"]]:
         r"""Extract tool message."""
@@ -100,14 +103,19 @@ class Template:
 
     def remove_thought(self, content: str) -> str:
         r"""Remove thought from assistant message."""
-        pattern = re.compile(f"{re.escape(self.thought_words[0])}(.*?){re.escape(self.thought_words[1])}", re.DOTALL)
+        pattern = re.compile(
+            f"{re.escape(self.thought_words[0])}(.*?){re.escape(self.thought_words[1])}",
+            re.DOTALL,
+        )
         return re.sub(pattern, "", content).lstrip("\n")
 
     def get_thought_word_ids(self, tokenizer: "PreTrainedTokenizer") -> list[int]:
         r"""Get the token ids of thought words."""
         return tokenizer.encode(self.add_thought(), add_special_tokens=False)
 
-    def _convert_elements_to_ids(self, tokenizer: "PreTrainedTokenizer", elements: "SLOTS") -> list[int]:
+    def _convert_elements_to_ids(
+        self, tokenizer: "PreTrainedTokenizer", elements: "SLOTS"
+    ) -> list[int]:
         r"""Convert elements to token ids."""
         token_ids = []
         for elem in elements:
@@ -122,7 +130,9 @@ class Template:
                 elif "eos_token" in elem and tokenizer.eos_token_id is not None:
                     token_ids += [tokenizer.eos_token_id]
             else:
-                raise ValueError(f"Input must be string, set[str] or dict[str, str], got {type(elem)}")
+                raise ValueError(
+                    f"Input must be string, set[str] or dict[str, str], got {type(elem)}"
+                )
 
         return token_ids
 
@@ -146,17 +156,23 @@ class Template:
             if i == 0:
                 elements += self.format_prefix.apply()
                 if system or tools:
-                    tool_text = self.format_tools.apply(content=tools)[0] if tools else ""
+                    tool_text = (
+                        self.format_tools.apply(content=tools)[0] if tools else ""
+                    )
                     elements += self.format_system.apply(content=(system + tool_text))
 
             if message["role"] == Role.USER:
-                elements += self.format_user.apply(content=message["content"], idx=str(i // 2))
+                elements += self.format_user.apply(
+                    content=message["content"], idx=str(i // 2)
+                )
             elif message["role"] == Role.ASSISTANT:
                 elements += self.format_assistant.apply(content=message["content"])
             elif message["role"] == Role.OBSERVATION:
                 elements += self.format_observation.apply(content=message["content"])
             elif message["role"] == Role.FUNCTION:
-                elements += self.format_function.apply(content=message["content"], thought_words=self.thought_words)
+                elements += self.format_function.apply(
+                    content=message["content"], thought_words=self.thought_words
+                )
             else:
                 raise NotImplementedError("Unexpected role: {}".format(message["role"]))
 
@@ -165,7 +181,9 @@ class Template:
         return encoded_messages
 
     @staticmethod
-    def _add_or_replace_eos_token(tokenizer: "PreTrainedTokenizer", eos_token: str) -> None:
+    def _add_or_replace_eos_token(
+        tokenizer: "PreTrainedTokenizer", eos_token: str
+    ) -> None:
         r"""Add or replace eos token to the tokenizer."""
         if tokenizer.eos_token == eos_token:
             return
@@ -179,7 +197,9 @@ class Template:
             logger.info_rank0(f"Replace eos token: {tokenizer.eos_token}.")
 
         if num_added_tokens > 0:
-            logger.warning_rank0("New tokens have been added, make sure `resize_vocab` is True.")
+            logger.warning_rank0(
+                "New tokens have been added, make sure `resize_vocab` is True."
+            )
 
     def fix_special_tokens(self, tokenizer: "PreTrainedTokenizer") -> None:
         r"""Add eos token and pad token to the tokenizer."""
@@ -200,11 +220,14 @@ class Template:
 
         if stop_words:
             num_added_tokens = tokenizer.add_special_tokens(
-                dict(additional_special_tokens=stop_words), replace_additional_special_tokens=False
+                dict(additional_special_tokens=stop_words),
+                replace_additional_special_tokens=False,
             )
             logger.info_rank0("Add {} to stop words.".format(",".join(stop_words)))
             if num_added_tokens > 0:
-                logger.warning_rank0("New tokens have been added, make sure `resize_vocab` is True.")
+                logger.warning_rank0(
+                    "New tokens have been added, make sure `resize_vocab` is True."
+                )
 
     @staticmethod
     def _jinja_escape(content: str) -> str:
@@ -212,19 +235,27 @@ class Template:
         return content.replace("'", r"\'")
 
     @staticmethod
-    def _convert_slots_to_jinja(slots: "SLOTS", tokenizer: "PreTrainedTokenizer", placeholder: str = "content") -> str:
+    def _convert_slots_to_jinja(
+        slots: "SLOTS", tokenizer: "PreTrainedTokenizer", placeholder: str = "content"
+    ) -> str:
         r"""Convert slots to jinja template."""
         slot_items = []
         for slot in slots:
             if isinstance(slot, str):
                 slot_pieces = slot.split("{{content}}")
                 if slot_pieces[0]:
-                    slot_items.append("'" + Template._jinja_escape(slot_pieces[0]) + "'")
+                    slot_items.append(
+                        "'" + Template._jinja_escape(slot_pieces[0]) + "'"
+                    )
                 if len(slot_pieces) > 1:
                     slot_items.append(placeholder)
                     if slot_pieces[1]:
-                        slot_items.append("'" + Template._jinja_escape(slot_pieces[1]) + "'")
-            elif isinstance(slot, set):  # do not use {{ eos_token }} since it may be replaced
+                        slot_items.append(
+                            "'" + Template._jinja_escape(slot_pieces[1]) + "'"
+                        )
+            elif isinstance(
+                slot, set
+            ):  # do not use {{ eos_token }} since it may be replaced
                 if "bos_token" in slot and tokenizer.bos_token_id is not None:
                     slot_items.append("'" + tokenizer.bos_token + "'")
                 elif "eos_token" in slot and tokenizer.eos_token_id is not None:
@@ -237,15 +268,23 @@ class Template:
     def _get_jinja_template(self, tokenizer: "PreTrainedTokenizer") -> str:
         r"""Return the jinja template."""
         prefix = self._convert_slots_to_jinja(self.format_prefix.apply(), tokenizer)
-        system = self._convert_slots_to_jinja(self.format_system.apply(), tokenizer, placeholder="system_message")
+        system = self._convert_slots_to_jinja(
+            self.format_system.apply(), tokenizer, placeholder="system_message"
+        )
         user = self._convert_slots_to_jinja(self.format_user.apply(), tokenizer)
-        assistant = self._convert_slots_to_jinja(self.format_assistant.apply(), tokenizer)
+        assistant = self._convert_slots_to_jinja(
+            self.format_assistant.apply(), tokenizer
+        )
         jinja_template = ""
         if prefix:
             jinja_template += "{{ " + prefix + " }}"
 
         if self.default_system:
-            jinja_template += "{% set system_message = '" + self._jinja_escape(self.default_system) + "' %}"
+            jinja_template += (
+                "{% set system_message = '"
+                + self._jinja_escape(self.default_system)
+                + "' %}"
+            )
 
         jinja_template += (
             "{% if messages[0]['role'] == 'system' %}{% set loop_messages = messages[1:] %}"
@@ -285,7 +324,9 @@ class Template:
                     slot_items.append("{{ " + placeholder + " }}")
                     if slot_pieces[1]:
                         slot_items.append(slot_pieces[1])
-            elif isinstance(slot, set):  # do not use {{ eos_token }} since it may be replaced
+            elif isinstance(
+                slot, set
+            ):  # do not use {{ eos_token }} since it may be replaced
                 if "bos_token" in slot and tokenizer.bos_token_id is not None:
                     slot_items.append(tokenizer.bos_token)
                 elif "eos_token" in slot and tokenizer.eos_token_id is not None:
@@ -298,9 +339,15 @@ class Template:
     def _get_ollama_template(self, tokenizer: "PreTrainedTokenizer") -> str:
         r"""Return the ollama template."""
         prefix = self._convert_slots_to_ollama(self.format_prefix.apply(), tokenizer)
-        system = self._convert_slots_to_ollama(self.format_system.apply(), tokenizer, placeholder=".System")
-        user = self._convert_slots_to_ollama(self.format_user.apply(), tokenizer, placeholder=".Content")
-        assistant = self._convert_slots_to_ollama(self.format_assistant.apply(), tokenizer, placeholder=".Content")
+        system = self._convert_slots_to_ollama(
+            self.format_system.apply(), tokenizer, placeholder=".System"
+        )
+        user = self._convert_slots_to_ollama(
+            self.format_user.apply(), tokenizer, placeholder=".Content"
+        )
+        assistant = self._convert_slots_to_ollama(
+            self.format_assistant.apply(), tokenizer, placeholder=".Content"
+        )
         return (
             f"{prefix}{{{{ if .System }}}}{system}{{{{ end }}}}"
             f"""{{{{ range .Messages }}}}{{{{ if eq .Role "user" }}}}{user}"""
@@ -313,13 +360,17 @@ class Template:
         TODO: support function calling.
         """
         modelfile = "# ollama modelfile auto-generated by llamafactory\n\n"
-        modelfile += f'FROM .\n\nTEMPLATE """{self._get_ollama_template(tokenizer)}"""\n\n'
+        modelfile += (
+            f'FROM .\n\nTEMPLATE """{self._get_ollama_template(tokenizer)}"""\n\n'
+        )
 
         if self.default_system:
             modelfile += f'SYSTEM """{self.default_system}"""\n\n'
 
         for stop_token_id in self.get_stop_token_ids(tokenizer):
-            modelfile += f'PARAMETER stop "{tokenizer.convert_ids_to_tokens(stop_token_id)}"\n'
+            modelfile += (
+                f'PARAMETER stop "{tokenizer.convert_ids_to_tokens(stop_token_id)}"\n'
+            )
 
         modelfile += "PARAMETER num_ctx 4096\n"
         return modelfile
@@ -346,11 +397,17 @@ class Llama2Template(Template):
             if i == 0:
                 elements += self.format_prefix.apply()
                 if system or tools:
-                    tool_text = self.format_tools.apply(content=tools)[0] if tools else ""
-                    system_text = self.format_system.apply(content=(system + tool_text))[0]
+                    tool_text = (
+                        self.format_tools.apply(content=tools)[0] if tools else ""
+                    )
+                    system_text = self.format_system.apply(
+                        content=(system + tool_text)
+                    )[0]
 
             if message["role"] == Role.USER:
-                elements += self.format_user.apply(content=system_text + message["content"])
+                elements += self.format_user.apply(
+                    content=system_text + message["content"]
+                )
             elif message["role"] == Role.ASSISTANT:
                 elements += self.format_assistant.apply(content=message["content"])
             elif message["role"] == Role.OBSERVATION:
@@ -370,13 +427,19 @@ class Llama2Template(Template):
             self.format_system.apply(), tokenizer, placeholder="system_message"
         )
         user_message = self._convert_slots_to_jinja(self.format_user.apply(), tokenizer)
-        assistant_message = self._convert_slots_to_jinja(self.format_assistant.apply(), tokenizer)
+        assistant_message = self._convert_slots_to_jinja(
+            self.format_assistant.apply(), tokenizer
+        )
         jinja_template = ""
         if prefix:
             jinja_template += "{{ " + prefix + " }}"
 
         if self.default_system:
-            jinja_template += "{% set system_message = '" + self._jinja_escape(self.default_system) + "' %}"
+            jinja_template += (
+                "{% set system_message = '"
+                + self._jinja_escape(self.default_system)
+                + "' %}"
+            )
 
         jinja_template += (
             "{% if messages[0]['role'] == 'system' %}{% set loop_messages = messages[1:] %}"
@@ -414,7 +477,9 @@ class ReasoningTemplate(Template):
         if self.enable_thinking is False:  # remove all cot
             messages[-1]["content"] = self.remove_thought(messages[-1]["content"])
 
-        prompt_ids, response_ids = super().encode_oneturn(tokenizer, messages, system, tools)
+        prompt_ids, response_ids = super().encode_oneturn(
+            tokenizer, messages, system, tools
+        )
         if (
             self.thought_words[0].strip() not in messages[-1]["content"]
             and self.thought_words[1].strip() not in messages[-1]["content"]
@@ -448,9 +513,14 @@ class ReasoningTemplate(Template):
                 if not self.enable_thinking:  # do not compute loss
                     encoded_messages[i] += self.get_thought_word_ids(tokenizer)
                 else:  # do compute loss
-                    encoded_messages[i + 1] = self.get_thought_word_ids(tokenizer) + encoded_messages[i + 1]
+                    encoded_messages[i + 1] = (
+                        self.get_thought_word_ids(tokenizer) + encoded_messages[i + 1]
+                    )
 
-        return [(encoded_messages[i], encoded_messages[i + 1]) for i in range(0, len(encoded_messages), 2)]
+        return [
+            (encoded_messages[i], encoded_messages[i + 1])
+            for i in range(0, len(encoded_messages), 2)
+        ]
 
 
 TEMPLATES: dict[str, "Template"] = {}
@@ -502,9 +572,13 @@ def register_template(
     default_user_formatter = StringFormatter(slots=["{{content}}"])
     default_assistant_formatter = StringFormatter(slots=default_slots)
     if format_assistant is not None:
-        default_function_formatter = FunctionFormatter(slots=format_assistant.slots, tool_format="default")
+        default_function_formatter = FunctionFormatter(
+            slots=format_assistant.slots, tool_format="default"
+        )
     else:
-        default_function_formatter = FunctionFormatter(slots=default_slots, tool_format="default")
+        default_function_formatter = FunctionFormatter(
+            slots=default_slots, tool_format="default"
+        )
 
     default_tool_formatter = ToolFormatter(tool_format="default")
     default_prefix_formatter = EmptyFormatter()
@@ -546,21 +620,37 @@ def parse_template(tokenizer: "PreTrainedTokenizer") -> "Template":
     prefix = tokenizer.decode(tokenizer.encode(""))
 
     messages = [{"role": "system", "content": "{{content}}"}]
-    system_slot = tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)[len(prefix) :]
+    system_slot = tokenizer.apply_chat_template(
+        messages, add_generation_prompt=False, tokenize=False
+    )[len(prefix) :]
 
-    messages = [{"role": "system", "content": ""}, {"role": "user", "content": "{{content}}"}]
-    user_slot_empty_system = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+    messages = [
+        {"role": "system", "content": ""},
+        {"role": "user", "content": "{{content}}"},
+    ]
+    user_slot_empty_system = tokenizer.apply_chat_template(
+        messages, add_generation_prompt=True, tokenize=False
+    )
     user_slot_empty_system = user_slot_empty_system[len(prefix) :]
 
     messages = [{"role": "user", "content": "{{content}}"}]
-    user_slot = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+    user_slot = tokenizer.apply_chat_template(
+        messages, add_generation_prompt=True, tokenize=False
+    )
     user_slot = user_slot[len(prefix) :]
 
-    messages = [{"role": "user", "content": "{{content}}"}, {"role": "assistant", "content": "{{content}}"}]
-    assistant_slot = tokenizer.apply_chat_template(messages, add_generation_prompt=False, tokenize=False)
+    messages = [
+        {"role": "user", "content": "{{content}}"},
+        {"role": "assistant", "content": "{{content}}"},
+    ]
+    assistant_slot = tokenizer.apply_chat_template(
+        messages, add_generation_prompt=False, tokenize=False
+    )
     assistant_slot = assistant_slot[len(prefix) + len(user_slot) :]
     template_class = ReasoningTemplate if "<think>" in assistant_slot else Template
-    assistant_slot = assistant_slot.replace("<think>", "").replace("</think>", "").lstrip("\n")  # remove thought tags
+    assistant_slot = (
+        assistant_slot.replace("<think>", "").replace("</think>", "").lstrip("\n")
+    )  # remove thought tags
 
     if len(user_slot) > len(user_slot_empty_system):
         default_system = find_diff(user_slot_empty_system, user_slot)
@@ -573,7 +663,9 @@ def parse_template(tokenizer: "PreTrainedTokenizer") -> "Template":
         format_user=StringFormatter(slots=[user_slot]),
         format_assistant=StringFormatter(slots=[assistant_slot]),
         format_system=StringFormatter(slots=[system_slot]),
-        format_function=FunctionFormatter(slots=[assistant_slot], tool_format="default"),
+        format_function=FunctionFormatter(
+            slots=[assistant_slot], tool_format="default"
+        ),
         format_observation=StringFormatter(slots=[user_slot]),
         format_tools=ToolFormatter(tool_format="default"),
         format_prefix=EmptyFormatter(slots=[prefix]) if prefix else EmptyFormatter(),
@@ -588,11 +680,15 @@ def parse_template(tokenizer: "PreTrainedTokenizer") -> "Template":
     )
 
 
-def get_template_and_fix_tokenizer(tokenizer: "PreTrainedTokenizer", data_args: "DataArguments") -> "Template":
+def get_template_and_fix_tokenizer(
+    tokenizer: "PreTrainedTokenizer", data_args: "DataArguments"
+) -> "Template":
     r"""Get chat template and fixes the tokenizer."""
     if data_args.template is None:
         if isinstance(tokenizer.chat_template, str):
-            logger.warning_rank0("`template` was not specified, try parsing the chat template from the tokenizer.")
+            logger.warning_rank0(
+                "`template` was not specified, try parsing the chat template from the tokenizer."
+            )
             template = parse_template(tokenizer)
         else:
             logger.warning_rank0("`template` was not specified, use `empty` template.")
@@ -608,8 +704,14 @@ def get_template_and_fix_tokenizer(tokenizer: "PreTrainedTokenizer", data_args: 
 
     if data_args.tool_format is not None:
         logger.info_rank0(f"Using tool format: {data_args.tool_format}.")
-        default_slots = ["{{content}}"] if template.efficient_eos else ["{{content}}", {"eos_token"}]
-        template.format_function = FunctionFormatter(slots=default_slots, tool_format=data_args.tool_format)
+        default_slots = (
+            ["{{content}}"]
+            if template.efficient_eos
+            else ["{{content}}", {"eos_token"}]
+        )
+        template.format_function = FunctionFormatter(
+            slots=default_slots, tool_format=data_args.tool_format
+        )
         template.format_tools = ToolFormatter(tool_format=data_args.tool_format)
 
     if data_args.default_system is not None:
@@ -631,7 +733,9 @@ def get_template_and_fix_tokenizer(tokenizer: "PreTrainedTokenizer", data_args: 
 
 register_template(
     name="alpaca",
-    format_user=StringFormatter(slots=["### Instruction:\n{{content}}\n\n### Response:\n"]),
+    format_user=StringFormatter(
+        slots=["### Instruction:\n{{content}}\n\n### Response:\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}", {"eos_token"}, "\n\n"]),
     default_system=(
         "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n"
@@ -656,7 +760,13 @@ register_template(
 register_template(
     name="atom",
     format_user=StringFormatter(
-        slots=[{"bos_token"}, "Human: {{content}}\n", {"eos_token"}, {"bos_token"}, "Assistant:"]
+        slots=[
+            {"bos_token"},
+            "Human: {{content}}\n",
+            {"eos_token"},
+            {"bos_token"},
+            "Assistant:",
+        ]
     ),
     format_assistant=StringFormatter(slots=["{{content}}\n", {"eos_token"}]),
 )
@@ -664,7 +774,9 @@ register_template(
 
 register_template(
     name="baichuan",
-    format_user=StringFormatter(slots=[{"token": "<reserved_102>"}, "{{content}}", {"token": "<reserved_103>"}]),
+    format_user=StringFormatter(
+        slots=[{"token": "<reserved_102>"}, "{{content}}", {"token": "<reserved_103>"}]
+    ),
     efficient_eos=True,
 )
 
@@ -678,9 +790,13 @@ register_template(
 
 register_template(
     name="bailing",
-    format_user=StringFormatter(slots=["<role>HUMAN</role>{{content}}<role>ASSISTANT</role>"]),
+    format_user=StringFormatter(
+        slots=["<role>HUMAN</role>{{content}}<role>ASSISTANT</role>"]
+    ),
     format_system=StringFormatter(slots=["<role>SYSTEM</role>{{content}}"]),
-    format_observation=StringFormatter(slots=["<role>OBSERVATION</role>{{content}}<role>ASSISTANT</role>"]),
+    format_observation=StringFormatter(
+        slots=["<role>OBSERVATION</role>{{content}}<role>ASSISTANT</role>"]
+    ),
     stop_words=["<|endoftext|>"],
     efficient_eos=True,
 )
@@ -688,7 +804,9 @@ register_template(
 
 register_template(
     name="bailing_v2",
-    format_user=StringFormatter(slots=["<role>HUMAN</role>{{content}}<|role_end|><role>ASSISTANT</role>"]),
+    format_user=StringFormatter(
+        slots=["<role>HUMAN</role>{{content}}<|role_end|><role>ASSISTANT</role>"]
+    ),
     format_system=StringFormatter(slots=["<role>SYSTEM</role>{{content}}<|role_end|>"]),
     format_assistant=StringFormatter(slots=["{{content}}<|role_end|>"]),
     format_observation=StringFormatter(
@@ -696,7 +814,9 @@ register_template(
             "<role>OBSERVATION</role>\n<tool_response>\n{{content}}\n</tool_response><|role_end|><role>ASSISTANT</role>"
         ]
     ),
-    format_function=FunctionFormatter(slots=["{{content}}<|role_end|>"], tool_format="ling"),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|role_end|>"], tool_format="ling"
+    ),
     format_tools=ToolFormatter(tool_format="ling"),
     stop_words=["<|endoftext|>"],
     efficient_eos=True,
@@ -713,7 +833,9 @@ register_template(
 
 register_template(
     name="bluelm",
-    format_user=StringFormatter(slots=[{"token": "[|Human|]:"}, "{{content}}", {"token": "[|AI|]:"}]),
+    format_user=StringFormatter(
+        slots=[{"token": "[|Human|]:"}, "{{content}}", {"token": "[|AI|]:"}]
+    ),
 )
 
 
@@ -735,12 +857,19 @@ register_template(
 
 register_template(
     name="chatglm3",
-    format_user=StringFormatter(slots=[{"token": "<|user|>"}, "\n", "{{content}}", {"token": "<|assistant|>"}]),
+    format_user=StringFormatter(
+        slots=[{"token": "<|user|>"}, "\n", "{{content}}", {"token": "<|assistant|>"}]
+    ),
     format_assistant=StringFormatter(slots=["\n", "{{content}}"]),
     format_system=StringFormatter(slots=[{"token": "<|system|>"}, "\n", "{{content}}"]),
     format_function=FunctionFormatter(slots=["{{content}}"], tool_format="glm4"),
     format_observation=StringFormatter(
-        slots=[{"token": "<|observation|>"}, "\n", "{{content}}", {"token": "<|assistant|>"}]
+        slots=[
+            {"token": "<|observation|>"},
+            "\n",
+            "{{content}}",
+            {"token": "<|assistant|>"},
+        ]
     ),
     format_tools=ToolFormatter(tool_format="glm4"),
     format_prefix=EmptyFormatter(slots=[{"token": "[gMASK]"}, {"token": "sop"}]),
@@ -751,10 +880,16 @@ register_template(
 
 register_template(
     name="chatml",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_observation=StringFormatter(slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_observation=StringFormatter(
+        slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     stop_words=["<|im_end|>", "<|im_start|>"],
     replace_eos=True,
     replace_jinja_template=True,
@@ -764,10 +899,16 @@ register_template(
 # copied from chatml template
 register_template(
     name="chatml_de",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_observation=StringFormatter(slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_observation=StringFormatter(
+        slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     default_system="Du bist ein freundlicher und hilfsbereiter KI-Assistent.",
     stop_words=["<|im_end|>", "<|im_start|>"],
     replace_eos=True,
@@ -786,7 +927,9 @@ register_template(
     format_user=StringFormatter(slots=["<|user|>\n{{content}}<|assistant|>\n"]),
     format_system=StringFormatter(slots=["<|system|>\n{{content}}"]),
     format_function=FunctionFormatter(slots=["{{content}}"], tool_format="glm4"),
-    format_observation=StringFormatter(slots=["<|observation|>\n{{content}}<|assistant|>\n"]),
+    format_observation=StringFormatter(
+        slots=["<|observation|>\n{{content}}<|assistant|>\n"]
+    ),
     format_tools=ToolFormatter(tool_format="glm4"),
     format_prefix=EmptyFormatter(slots=["[gMASK]<sop>"]),
     default_system=(
@@ -808,7 +951,11 @@ register_template(
             )
         ]
     ),
-    format_system=StringFormatter(slots=["<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{content}}<|END_OF_TURN_TOKEN|>"]),
+    format_system=StringFormatter(
+        slots=[
+            "<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{{content}}<|END_OF_TURN_TOKEN|>"
+        ]
+    ),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
 )
 
@@ -823,10 +970,16 @@ register_template(
 # copied from chatml template
 register_template(
     name="cpm3",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_observation=StringFormatter(slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_observation=StringFormatter(
+        slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     stop_words=["<|im_end|>"],
 )
@@ -835,10 +988,16 @@ register_template(
 # copied from chatml template
 register_template(
     name="cpm4",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_observation=StringFormatter(slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_observation=StringFormatter(
+        slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     stop_words=["<|im_end|>"],
 )
@@ -847,10 +1006,16 @@ register_template(
 # copied from chatml template
 register_template(
     name="dbrx",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_observation=StringFormatter(slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_observation=StringFormatter(
+        slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     default_system=(
         "You are DBRX, created by Databricks. You were last updated in December 2023. "
         "You answer questions based on information available up to that point.\n"
@@ -911,7 +1076,9 @@ register_template(
 
 register_template(
     name="default",
-    format_user=StringFormatter(slots=["Human: {{content}}", {"eos_token"}, "\nAssistant:"]),
+    format_user=StringFormatter(
+        slots=["Human: {{content}}", {"eos_token"}, "\nAssistant:"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}", {"eos_token"}, "\n"]),
     format_system=StringFormatter(slots=["System: {{content}}", {"eos_token"}, "\n"]),
     replace_jinja_template=True,
@@ -920,7 +1087,9 @@ register_template(
 
 register_template(
     name="dots_ocr",
-    format_user=StringFormatter(slots=["<|user|>{{content}}<|endofuser|><|assistant|>"]),
+    format_user=StringFormatter(
+        slots=["<|user|>{{content}}<|endofuser|><|assistant|>"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|endofassistant|>"]),
     format_system=StringFormatter(slots=["<|system|>{{content}}<|endofsystem|>\n"]),
     stop_words=["<|endofassistant|>"],
@@ -944,10 +1113,16 @@ register_template(
 # copied from chatml template
 register_template(
     name="ernie",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n\n"]),
-    format_observation=StringFormatter(slots=["<|im_start|>tool\n{{content}}<|im_end|>\n\n<|im_start|>assistant\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n\n"]
+    ),
+    format_observation=StringFormatter(
+        slots=["<|im_start|>tool\n{{content}}<|im_end|>\n\n<|im_start|>assistant\n"]
+    ),
     default_system="<global_setting>\nthink_mode=True\n</global_setting>",
     stop_words=["<|im_end|>"],
 )
@@ -966,13 +1141,19 @@ register_template(
 register_template(
     name="ernie_vl",
     format_user=StringFormatter(slots=["User: {{content}}"]),
-    format_assistant=StringFormatter(slots=["\nAssistant: {{content}}<|end_of_sentence|>"]),
+    format_assistant=StringFormatter(
+        slots=["\nAssistant: {{content}}<|end_of_sentence|>"]
+    ),
     format_system=StringFormatter(slots=["{{content}}\n"]),
     stop_words=["<|end_of_sentence|>"],
     replace_eos=True,
     replace_jinja_template=True,
     template_class=ReasoningTemplate,
-    mm_plugin=get_mm_plugin(name="ernie_vl", image_token="<|image@placeholder|>", video_token="<|video@placeholder|>"),
+    mm_plugin=get_mm_plugin(
+        name="ernie_vl",
+        image_token="<|image@placeholder|>",
+        video_token="<|video@placeholder|>",
+    ),
 )
 
 
@@ -995,10 +1176,16 @@ register_template(
 # copied from chatml template
 register_template(
     name="falcon_h1",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_observation=StringFormatter(slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_observation=StringFormatter(
+        slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     stop_words=["<|im_end|>", "<|end_of_text|>"],
 )
@@ -1014,7 +1201,9 @@ register_template(
 
 register_template(
     name="gemma",
-    format_user=StringFormatter(slots=["<start_of_turn>user\n{{content}}<end_of_turn>\n<start_of_turn>model\n"]),
+    format_user=StringFormatter(
+        slots=["<start_of_turn>user\n{{content}}<end_of_turn>\n<start_of_turn>model\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<end_of_turn>\n"]),
     format_system=StringFormatter(slots=["{{content}}\n\n"]),
     format_observation=StringFormatter(
@@ -1030,7 +1219,9 @@ register_template(
 # copied from gemma template
 register_template(
     name="gemma2",
-    format_user=StringFormatter(slots=["<start_of_turn>user\n{{content}}<end_of_turn>\n<start_of_turn>model\n"]),
+    format_user=StringFormatter(
+        slots=["<start_of_turn>user\n{{content}}<end_of_turn>\n<start_of_turn>model\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<end_of_turn>\n"]),
     format_system=StringFormatter(slots=["{{content}}\n\n"]),
     format_observation=StringFormatter(
@@ -1046,7 +1237,9 @@ register_template(
 # copied from gemma template
 register_template(
     name="gemma3",
-    format_user=StringFormatter(slots=["<start_of_turn>user\n{{content}}<end_of_turn>\n<start_of_turn>model\n"]),
+    format_user=StringFormatter(
+        slots=["<start_of_turn>user\n{{content}}<end_of_turn>\n<start_of_turn>model\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<end_of_turn>\n"]),
     format_system=StringFormatter(slots=["{{content}}\n\n"]),
     format_observation=StringFormatter(
@@ -1062,7 +1255,9 @@ register_template(
 
 register_template(
     name="gemma3n",
-    format_user=StringFormatter(slots=["<start_of_turn>user\n{{content}}<end_of_turn>\n<start_of_turn>model\n"]),
+    format_user=StringFormatter(
+        slots=["<start_of_turn>user\n{{content}}<end_of_turn>\n<start_of_turn>model\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<end_of_turn>\n"]),
     format_system=StringFormatter(slots=["{{content}}\n\n"]),
     format_observation=StringFormatter(
@@ -1071,7 +1266,9 @@ register_template(
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     stop_words=["<end_of_turn>"],
     replace_eos=True,
-    mm_plugin=get_mm_plugin("gemma3n", image_token="<image_soft_token>", audio_token="<audio_soft_token>"),
+    mm_plugin=get_mm_plugin(
+        "gemma3n", image_token="<image_soft_token>", audio_token="<audio_soft_token>"
+    ),
     template_class=Llama2Template,
 )
 
@@ -1082,7 +1279,9 @@ register_template(
     format_assistant=StringFormatter(slots=["\n{{content}}"]),
     format_system=StringFormatter(slots=["<|system|>\n{{content}}"]),
     format_function=FunctionFormatter(slots=["{{content}}"], tool_format="glm4"),
-    format_observation=StringFormatter(slots=["<|observation|>\n{{content}}<|assistant|>"]),
+    format_observation=StringFormatter(
+        slots=["<|observation|>\n{{content}}<|assistant|>"]
+    ),
     format_tools=ToolFormatter(tool_format="glm4"),
     format_prefix=EmptyFormatter(slots=["[gMASK]<sop>"]),
     stop_words=["<|user|>", "<|observation|>"],
@@ -1097,7 +1296,9 @@ register_template(
     format_assistant=StringFormatter(slots=["\n{{content}}"]),
     format_system=StringFormatter(slots=["<|system|>\n{{content}}"]),
     format_function=FunctionFormatter(slots=["{{content}}"], tool_format="glm4_moe"),
-    format_observation=StringFormatter(slots=["<|observation|>\n{{content}}<|assistant|>"]),
+    format_observation=StringFormatter(
+        slots=["<|observation|>\n{{content}}<|assistant|>"]
+    ),
     format_tools=ToolFormatter(tool_format="glm4_moe"),
     format_prefix=EmptyFormatter(slots=["[gMASK]<sop>"]),
     stop_words=["<|user|>", "<|observation|>"],
@@ -1113,12 +1314,16 @@ register_template(
     format_assistant=StringFormatter(slots=["\n{{content}}"]),
     format_system=StringFormatter(slots=["<|system|>\n{{content}}"]),
     format_function=FunctionFormatter(slots=["{{content}}"], tool_format="glm4"),
-    format_observation=StringFormatter(slots=["<|observation|>\n{{content}}<|assistant|>"]),
+    format_observation=StringFormatter(
+        slots=["<|observation|>\n{{content}}<|assistant|>"]
+    ),
     format_tools=ToolFormatter(tool_format="glm4"),
     format_prefix=EmptyFormatter(slots=["[gMASK]<sop>"]),
     stop_words=["<|user|>", "<|observation|>", "</answer>"],
     efficient_eos=True,
-    mm_plugin=get_mm_plugin(name="glm4v", image_token="<|image|>", video_token="<|video|>"),
+    mm_plugin=get_mm_plugin(
+        name="glm4v", image_token="<|image|>", video_token="<|video|>"
+    ),
     template_class=ReasoningTemplate,
 )
 
@@ -1130,12 +1335,16 @@ register_template(
     format_assistant=StringFormatter(slots=["\n{{content}}"]),
     format_system=StringFormatter(slots=["<|system|>\n{{content}}"]),
     format_function=FunctionFormatter(slots=["{{content}}"], tool_format="glm4_moe"),
-    format_observation=StringFormatter(slots=["<|observation|>\n{{content}}<|assistant|>"]),
+    format_observation=StringFormatter(
+        slots=["<|observation|>\n{{content}}<|assistant|>"]
+    ),
     format_tools=ToolFormatter(tool_format="glm4_moe"),
     format_prefix=EmptyFormatter(slots=["[gMASK]<sop>"]),
     stop_words=["<|user|>", "<|observation|>", "</answer>"],
     efficient_eos=True,
-    mm_plugin=get_mm_plugin(name="glm4v", image_token="<|image|>", video_token="<|video|>"),
+    mm_plugin=get_mm_plugin(
+        name="glm4v", image_token="<|image|>", video_token="<|video|>"
+    ),
     template_class=ReasoningTemplate,
 )
 
@@ -1147,7 +1356,9 @@ register_template(
     format_assistant=StringFormatter(slots=["\n{{content}}"]),
     format_system=StringFormatter(slots=["<|system|>\n{{content}}"]),
     format_function=FunctionFormatter(slots=["{{content}}"], tool_format="glm4"),
-    format_observation=StringFormatter(slots=["<|observation|>\n{{content}}<|assistant|>"]),
+    format_observation=StringFormatter(
+        slots=["<|observation|>\n{{content}}<|assistant|>"]
+    ),
     format_tools=ToolFormatter(tool_format="glm4"),
     format_prefix=EmptyFormatter(slots=["[gMASK]<sop>"]),
     stop_words=["<|user|>", "<|observation|>"],
@@ -1158,11 +1369,18 @@ register_template(
 
 register_template(
     name="gpt",
-    format_user=StringFormatter(slots=["<|start|>user<|message|>{{content}}<|end|><|start|>assistant"]),
+    format_user=StringFormatter(
+        slots=["<|start|>user<|message|>{{content}}<|end|><|start|>assistant"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|end|>"]),
-    format_system=StringFormatter(slots=["<|start|>system<|message|>{{content}}<|end|>"]),
+    format_system=StringFormatter(
+        slots=["<|start|>system<|message|>{{content}}<|end|>"]
+    ),
     default_system="You are ChatGPT, a large language model trained by OpenAI.",
-    thought_words=("<|channel|>analysis<|message|>", "<|end|><|start|>assistant<|channel|>final<|message|>"),
+    thought_words=(
+        "<|channel|>analysis<|message|>",
+        "<|end|><|start|>assistant<|channel|>final<|message|>",
+    ),
     efficient_eos=True,
     template_class=ReasoningTemplate,
 )
@@ -1176,7 +1394,9 @@ register_template(
         ]
     ),
     format_assistant=StringFormatter(slots=["{{content}}<|end_of_text|>\n"]),
-    format_system=StringFormatter(slots=["<|start_of_role|>system<|end_of_role|>{{content}}<|end_of_text|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|start_of_role|>system<|end_of_role|>{{content}}<|end_of_text|>\n"]
+    ),
 )
 
 
@@ -1200,10 +1420,16 @@ register_template(
         ]
     ),
     format_assistant=StringFormatter(slots=["{{content}}<|end_of_text|>\n"]),
-    format_system=StringFormatter(slots=["<|start_of_role|>system<|end_of_role|>{{content}}<|end_of_text|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|end_of_text|>\n"], tool_format="default"),
+    format_system=StringFormatter(
+        slots=["<|start_of_role|>system<|end_of_role|>{{content}}<|end_of_text|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|end_of_text|>\n"], tool_format="default"
+    ),
     format_observation=StringFormatter(
-        slots=["<|start_of_role|>tool<|end_of_role|>{{content}}<|end_of_text|>\n<|start_of_role|>assistant\n"]
+        slots=[
+            "<|start_of_role|>tool<|end_of_role|>{{content}}<|end_of_text|>\n<|start_of_role|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="default"),
     stop_words=["<|end_of_text|>"],
@@ -1248,9 +1474,13 @@ register_template(
 
 register_template(
     name="intern2",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     default_system=(
         "You are an AI assistant whose name is InternLM (书生·浦语).\n"
@@ -1265,43 +1495,65 @@ register_template(
 
 register_template(
     name="intern_vl",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     default_system=(
         "你是书生·万象，英文名是InternVL，是由上海人工智能实验室、清华大学及多家合作单位联合开发的多模态大语言模型。"
     ),
     stop_words=["<|im_end|>"],
-    mm_plugin=get_mm_plugin(name="intern_vl", image_token="<image>", video_token="<video>"),
+    mm_plugin=get_mm_plugin(
+        name="intern_vl", image_token="<image>", video_token="<video>"
+    ),
 )
 
 
 register_template(
     name="intern_s1",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     stop_words=["<|im_end|>"],
-    mm_plugin=get_mm_plugin(name="intern_vl", image_token="<image>", video_token="<video>"),
+    mm_plugin=get_mm_plugin(
+        name="intern_vl", image_token="<image>", video_token="<video>"
+    ),
 )
 
 
 # copied from qwen template
 register_template(
     name="keye_vl",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     stop_words=["<|im_end|>"],
     replace_eos=True,
-    mm_plugin=get_mm_plugin(name="qwen2_vl", image_token="<|image_pad|>", video_token="<|video_pad|>"),
+    mm_plugin=get_mm_plugin(
+        name="qwen2_vl", image_token="<|image_pad|>", video_token="<|video_pad|>"
+    ),
     template_class=ReasoningTemplate,
 )
 
@@ -1309,10 +1561,14 @@ register_template(
 register_template(
     name="kimi_vl",
     format_user=StringFormatter(
-        slots=["<|im_user|>user<|im_middle|>{{content}}<|im_end|><|im_assistant|>assistant<|im_middle|>"]
+        slots=[
+            "<|im_user|>user<|im_middle|>{{content}}<|im_end|><|im_assistant|>assistant<|im_middle|>"
+        ]
     ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>"]),
-    format_system=StringFormatter(slots=["<|im_system|>system<|im_middle|>{{content}}<|im_end|>"]),
+    format_system=StringFormatter(
+        slots=["<|im_system|>system<|im_middle|>{{content}}<|im_end|>"]
+    ),
     default_system="You are a helpful assistant",
     stop_words=["<|im_end|>"],
     thought_words=("◁think▷", "◁/think▷"),
@@ -1350,8 +1606,12 @@ register_template(
         ]
     ),
     format_assistant=StringFormatter(slots=["{{content}}<|eot_id|>"]),
-    format_system=StringFormatter(slots=["<|start_header_id|>system<|end_header_id|>\n\n{{content}}<|eot_id|>"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|eot_id|>"], tool_format="llama3"),
+    format_system=StringFormatter(
+        slots=["<|start_header_id|>system<|end_header_id|>\n\n{{content}}<|eot_id|>"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|eot_id|>"], tool_format="llama3"
+    ),
     format_observation=StringFormatter(
         slots=[
             (
@@ -1370,11 +1630,17 @@ register_template(
 register_template(
     name="llama4",
     format_user=StringFormatter(
-        slots=["<|header_start|>user<|header_end|>\n\n{{content}}<|eot|><|header_start|>assistant<|header_end|>\n\n"]
+        slots=[
+            "<|header_start|>user<|header_end|>\n\n{{content}}<|eot|><|header_start|>assistant<|header_end|>\n\n"
+        ]
     ),
     format_assistant=StringFormatter(slots=["{{content}}<|eot|>"]),
-    format_system=StringFormatter(slots=["<|header_start|>system<|header_end|>\n\n{{content}}<|eot|>"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|eot|>"], tool_format="llama3"),
+    format_system=StringFormatter(
+        slots=["<|header_start|>system<|header_end|>\n\n{{content}}<|eot|>"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|eot|>"], tool_format="llama3"
+    ),
     format_observation=StringFormatter(
         slots=[
             "<|header_start|>ipython<|header_end|>\n\n{{content}}<|eot|><|header_start|>assistant<|header_end|>\n\n"
@@ -1400,8 +1666,12 @@ register_template(
         ]
     ),
     format_assistant=StringFormatter(slots=["{{content}}<|eot_id|>"]),
-    format_system=StringFormatter(slots=["<|start_header_id|>system<|end_header_id|>\n\n{{content}}<|eot_id|>"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|eot_id|>"], tool_format="llama3"),
+    format_system=StringFormatter(
+        slots=["<|start_header_id|>system<|end_header_id|>\n\n{{content}}<|eot_id|>"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|eot_id|>"], tool_format="llama3"
+    ),
     format_observation=StringFormatter(
         slots=[
             (
@@ -1421,10 +1691,14 @@ register_template(
 register_template(
     name="moonlight",
     format_user=StringFormatter(
-        slots=["<|im_user|>user<|im_middle|>{{content}}<|im_end|><|im_assistant|>assistant<|im_middle|>"]
+        slots=[
+            "<|im_user|>user<|im_middle|>{{content}}<|im_end|><|im_assistant|>assistant<|im_middle|>"
+        ]
     ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>"]),
-    format_system=StringFormatter(slots=["<|im_system|>system<|im_middle|>{{content}}<|im_end|>"]),
+    format_system=StringFormatter(
+        slots=["<|im_system|>system<|im_middle|>{{content}}<|im_end|>"]
+    ),
     default_system="You are a helpful assistant provided by Moonshot-AI.",
     stop_words=["<|im_end|>"],
     replace_eos=True,
@@ -1467,8 +1741,12 @@ register_template(
         ]
     ),
     format_assistant=StringFormatter(slots=["{{content}}<|eot_id|>"]),
-    format_system=StringFormatter(slots=["<|start_header_id|>system<|end_header_id|>\n\n{{content}}<|eot_id|>"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|eot_id|>"], tool_format="llama3"),
+    format_system=StringFormatter(
+        slots=["<|start_header_id|>system<|end_header_id|>\n\n{{content}}<|eot_id|>"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|eot_id|>"], tool_format="llama3"
+    ),
     format_observation=StringFormatter(
         slots=[
             (
@@ -1491,8 +1769,12 @@ register_template(
     format_user=StringFormatter(slots=["[INST] {{content}}[/INST]"]),
     format_assistant=StringFormatter(slots=[" {{content}}", {"eos_token"}]),
     format_system=StringFormatter(slots=["{{content}}\n\n"]),
-    format_function=FunctionFormatter(slots=["[TOOL_CALLS] {{content}}", {"eos_token"}], tool_format="mistral"),
-    format_observation=StringFormatter(slots=["""[TOOL_RESULTS] {"content": {{content}}}[/TOOL_RESULTS]"""]),
+    format_function=FunctionFormatter(
+        slots=["[TOOL_CALLS] {{content}}", {"eos_token"}], tool_format="mistral"
+    ),
+    format_observation=StringFormatter(
+        slots=["""[TOOL_RESULTS] {"content": {{content}}}[/TOOL_RESULTS]"""]
+    ),
     format_tools=ToolFormatter(tool_format="mistral"),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     mm_plugin=get_mm_plugin(name="llava_next", image_token="<image>"),
@@ -1503,12 +1785,20 @@ register_template(
 # copied from qwen template
 register_template(
     name="llava_next_qwen",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     default_system="You are a helpful assistant.",
@@ -1521,9 +1811,13 @@ register_template(
 # copied from chatml template
 register_template(
     name="llava_next_yi",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     stop_words=["<|im_end|>"],
     mm_plugin=get_mm_plugin(name="llava_next", image_token="<image>"),
 )
@@ -1537,7 +1831,9 @@ register_template(
         "A chat between a curious user and an artificial intelligence assistant. "
         "The assistant gives helpful, detailed, and polite answers to the user's questions."
     ),
-    mm_plugin=get_mm_plugin(name="llava_next_video", image_token="<image>", video_token="<video>"),
+    mm_plugin=get_mm_plugin(
+        name="llava_next_video", image_token="<image>", video_token="<video>"
+    ),
 )
 
 
@@ -1547,11 +1843,17 @@ register_template(
     format_user=StringFormatter(slots=["[INST] {{content}}[/INST]"]),
     format_assistant=StringFormatter(slots=[" {{content}}", {"eos_token"}]),
     format_system=StringFormatter(slots=["{{content}}\n\n"]),
-    format_function=FunctionFormatter(slots=["[TOOL_CALLS] {{content}}", {"eos_token"}], tool_format="mistral"),
-    format_observation=StringFormatter(slots=["""[TOOL_RESULTS] {"content": {{content}}}[/TOOL_RESULTS]"""]),
+    format_function=FunctionFormatter(
+        slots=["[TOOL_CALLS] {{content}}", {"eos_token"}], tool_format="mistral"
+    ),
+    format_observation=StringFormatter(
+        slots=["""[TOOL_RESULTS] {"content": {{content}}}[/TOOL_RESULTS]"""]
+    ),
     format_tools=ToolFormatter(tool_format="mistral"),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
-    mm_plugin=get_mm_plugin(name="llava_next_video", image_token="<image>", video_token="<video>"),
+    mm_plugin=get_mm_plugin(
+        name="llava_next_video", image_token="<image>", video_token="<video>"
+    ),
     template_class=Llama2Template,
 )
 
@@ -1559,21 +1861,33 @@ register_template(
 # copied from chatml template
 register_template(
     name="llava_next_video_yi",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     stop_words=["<|im_end|>"],
-    mm_plugin=get_mm_plugin(name="llava_next_video", image_token="<image>", video_token="<video>"),
+    mm_plugin=get_mm_plugin(
+        name="llava_next_video", image_token="<image>", video_token="<video>"
+    ),
 )
 
 
 # copied from chatml template
 register_template(
     name="marco",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_observation=StringFormatter(slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_observation=StringFormatter(
+        slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     default_system=(
         "你是一个经过良好训练的AI助手，你的名字是Marco-o1."
         "由阿里国际数字商业集团的AI Business创造.\n## 重要！！！！！\n"
@@ -1587,12 +1901,20 @@ register_template(
 # copied from qwen template
 register_template(
     name="mimo",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     default_system="You are a helpful assistant.",
@@ -1604,18 +1926,28 @@ register_template(
 # copied from qwen2vl
 register_template(
     name="mimo_vl",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     default_system="You are MiMo, an AI assistant developed by Xiaomi.",
     stop_words=["<|im_end|>"],
     replace_eos=True,
-    mm_plugin=get_mm_plugin(name="qwen2_vl", image_token="<|image_pad|>", video_token="<|video_pad|>"),
+    mm_plugin=get_mm_plugin(
+        name="qwen2_vl", image_token="<|image_pad|>", video_token="<|video_pad|>"
+    ),
     template_class=ReasoningTemplate,
 )
 
@@ -1623,24 +1955,39 @@ register_template(
 # copied from chatml template
 register_template(
     name="minicpm_v",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     stop_words=["<|im_end|>"],
     default_system="You are a helpful assistant.",
-    mm_plugin=get_mm_plugin(name="minicpm_v", image_token="<image>", video_token="<video>"),
+    mm_plugin=get_mm_plugin(
+        name="minicpm_v", image_token="<image>", video_token="<video>"
+    ),
 )
 
 
 # copied from minicpm_v template
 register_template(
     name="minicpm_o",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     stop_words=["<|im_end|>"],
     default_system="You are a helpful assistant. You can accept audio and text input and output voice and text.",
-    mm_plugin=get_mm_plugin(name="minicpm_v", image_token="<image>", video_token="<video>", audio_token="<audio>"),
+    mm_plugin=get_mm_plugin(
+        name="minicpm_v",
+        image_token="<image>",
+        video_token="<video>",
+        audio_token="<audio>",
+    ),
 )
 
 
@@ -1649,8 +1996,12 @@ register_template(
     name="ministral",
     format_user=StringFormatter(slots=["[INST]{{content}}[/INST]"]),
     format_system=StringFormatter(slots=["{{content}}\n\n"]),
-    format_function=FunctionFormatter(slots=["[TOOL_CALLS]{{content}}", {"eos_token"}], tool_format="mistral"),
-    format_observation=StringFormatter(slots=["""[TOOL_RESULTS]{"content": {{content}}}[/TOOL_RESULTS]"""]),
+    format_function=FunctionFormatter(
+        slots=["[TOOL_CALLS]{{content}}", {"eos_token"}], tool_format="mistral"
+    ),
+    format_observation=StringFormatter(
+        slots=["""[TOOL_RESULTS]{"content": {{content}}}[/TOOL_RESULTS]"""]
+    ),
     format_tools=ToolFormatter(tool_format="mistral"),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     template_class=Llama2Template,
@@ -1663,8 +2014,12 @@ register_template(
     format_user=StringFormatter(slots=["[INST] {{content}}[/INST]"]),
     format_assistant=StringFormatter(slots=[" {{content}}", {"eos_token"}]),
     format_system=StringFormatter(slots=["{{content}}\n\n"]),
-    format_function=FunctionFormatter(slots=["[TOOL_CALLS] {{content}}", {"eos_token"}], tool_format="mistral"),
-    format_observation=StringFormatter(slots=["""[TOOL_RESULTS] {"content": {{content}}}[/TOOL_RESULTS]"""]),
+    format_function=FunctionFormatter(
+        slots=["[TOOL_CALLS] {{content}}", {"eos_token"}], tool_format="mistral"
+    ),
+    format_observation=StringFormatter(
+        slots=["""[TOOL_RESULTS] {"content": {{content}}}[/TOOL_RESULTS]"""]
+    ),
     format_tools=ToolFormatter(tool_format="mistral"),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     template_class=Llama2Template,
@@ -1676,8 +2031,12 @@ register_template(
     name="mistral_small",
     format_user=StringFormatter(slots=["[INST]{{content}}[/INST]"]),
     format_system=StringFormatter(slots=["[SYSTEM_PROMPT]{{content}}[/SYSTEM_PROMPT]"]),
-    format_function=FunctionFormatter(slots=["[TOOL_CALLS]{{content}}", {"eos_token"}], tool_format="mistral"),
-    format_observation=StringFormatter(slots=["""[TOOL_RESULTS]{"content": {{content}}}[/TOOL_RESULTS]"""]),
+    format_function=FunctionFormatter(
+        slots=["[TOOL_CALLS]{{content}}", {"eos_token"}], tool_format="mistral"
+    ),
+    format_observation=StringFormatter(
+        slots=["""[TOOL_RESULTS]{"content": {{content}}}[/TOOL_RESULTS]"""]
+    ),
     format_tools=ToolFormatter(tool_format="mistral"),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     mm_plugin=get_mm_plugin(name="pixtral", image_token="[IMG]"),
@@ -1693,7 +2052,13 @@ register_template(
 
 register_template(
     name="openchat",
-    format_user=StringFormatter(slots=["GPT4 Correct User: {{content}}", {"eos_token"}, "GPT4 Correct Assistant:"]),
+    format_user=StringFormatter(
+        slots=[
+            "GPT4 Correct User: {{content}}",
+            {"eos_token"},
+            "GPT4 Correct Assistant:",
+        ]
+    ),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
 )
 
@@ -1716,10 +2081,16 @@ register_template(
 # copied from chatml template
 register_template(
     name="opencoder",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_observation=StringFormatter(slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_observation=StringFormatter(
+        slots=["<|im_start|>tool\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     default_system="You are OpenCoder, created by OpenCoder Team.",
     stop_words=["<|im_end|>"],
 )
@@ -1727,7 +2098,9 @@ register_template(
 
 register_template(
     name="orion",
-    format_user=StringFormatter(slots=["Human: {{content}}\n\nAssistant: ", {"eos_token"}]),
+    format_user=StringFormatter(
+        slots=["Human: {{content}}\n\nAssistant: ", {"eos_token"}]
+    ),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
 )
 
@@ -1744,7 +2117,9 @@ register_template(
 # copied from gemma template
 register_template(
     name="paligemma_chat",
-    format_user=StringFormatter(slots=["<start_of_turn>user\n{{content}}<end_of_turn>\n<start_of_turn>model\n"]),
+    format_user=StringFormatter(
+        slots=["<start_of_turn>user\n{{content}}<end_of_turn>\n<start_of_turn>model\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<end_of_turn>\n"]),
     format_observation=StringFormatter(
         slots=["<start_of_turn>tool\n{{content}}<end_of_turn>\n<start_of_turn>model\n"]
@@ -1759,7 +2134,9 @@ register_template(
 
 register_template(
     name="phi",
-    format_user=StringFormatter(slots=["<|user|>\n{{content}}<|end|>\n<|assistant|>\n"]),
+    format_user=StringFormatter(
+        slots=["<|user|>\n{{content}}<|end|>\n<|assistant|>\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|end|>\n"]),
     format_system=StringFormatter(slots=["<|system|>\n{{content}}<|end|>\n"]),
     stop_words=["<|end|>"],
@@ -1769,7 +2146,9 @@ register_template(
 
 register_template(
     name="phi_small",
-    format_user=StringFormatter(slots=["<|user|>\n{{content}}<|end|>\n<|assistant|>\n"]),
+    format_user=StringFormatter(
+        slots=["<|user|>\n{{content}}<|end|>\n<|assistant|>\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|end|>\n"]),
     format_system=StringFormatter(slots=["<|system|>\n{{content}}<|end|>\n"]),
     format_prefix=EmptyFormatter(slots=[{"<|endoftext|>"}]),
@@ -1781,10 +2160,14 @@ register_template(
 register_template(
     name="phi4",
     format_user=StringFormatter(
-        slots=["<|im_start|>user<|im_sep|>{{content}}<|im_end|><|im_start|>assistant<|im_sep|>"]
+        slots=[
+            "<|im_start|>user<|im_sep|>{{content}}<|im_end|><|im_start|>assistant<|im_sep|>"
+        ]
     ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>"]),
-    format_system=StringFormatter(slots=["<|im_start|>system<|im_sep|>{{content}}<|im_end|>"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system<|im_sep|>{{content}}<|im_end|>"]
+    ),
     stop_words=["<|im_end|>"],
     replace_eos=True,
 )
@@ -1795,8 +2178,12 @@ register_template(
     name="pixtral",
     format_user=StringFormatter(slots=["[INST]{{content}}[/INST]"]),
     format_system=StringFormatter(slots=["{{content}}\n\n"]),
-    format_function=FunctionFormatter(slots=["[TOOL_CALLS]{{content}}", {"eos_token"}], tool_format="mistral"),
-    format_observation=StringFormatter(slots=["""[TOOL_RESULTS]{"content": {{content}}}[/TOOL_RESULTS]"""]),
+    format_function=FunctionFormatter(
+        slots=["[TOOL_CALLS]{{content}}", {"eos_token"}], tool_format="mistral"
+    ),
+    format_observation=StringFormatter(
+        slots=["""[TOOL_RESULTS]{"content": {{content}}}[/TOOL_RESULTS]"""]
+    ),
     format_tools=ToolFormatter(tool_format="mistral"),
     format_prefix=EmptyFormatter(slots=[{"bos_token"}]),
     mm_plugin=get_mm_plugin(name="pixtral", image_token="[IMG]"),
@@ -1807,12 +2194,20 @@ register_template(
 # copied from chatml template
 register_template(
     name="qwen",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     default_system="You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
@@ -1824,12 +2219,20 @@ register_template(
 # copied from qwen template
 register_template(
     name="qwen3",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     stop_words=["<|im_end|>"],
@@ -1841,12 +2244,20 @@ register_template(
 # copied from qwen template
 register_template(
     name="qwen3_nothink",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     stop_words=["<|im_end|>"],
@@ -1857,9 +2268,13 @@ register_template(
 # copied from chatml template
 register_template(
     name="qwen2_audio",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     default_system="You are a helpful assistant.",
     stop_words=["<|im_end|>"],
     replace_eos=True,
@@ -1870,12 +2285,20 @@ register_template(
 # copied from qwen template
 register_template(
     name="qwen2_omni",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     default_system="You are a helpful assistant.",
@@ -1896,18 +2319,29 @@ register_template(
 
 register_template(
     name="qwen3_omni",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     stop_words=["<|im_end|>"],
     replace_eos=True,
     mm_plugin=get_mm_plugin(
-        name="qwen2_omni", image_token="<|image_pad|>", video_token="<|video_pad|>", audio_token="<|audio_pad|>"
+        name="qwen2_omni",
+        image_token="<|image_pad|>",
+        video_token="<|video_pad|>",
+        audio_token="<|audio_pad|>",
     ),
     template_class=ReasoningTemplate,
 )
@@ -1915,18 +2349,29 @@ register_template(
 
 register_template(
     name="qwen3_omni_nothink",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     stop_words=["<|im_end|>"],
     replace_eos=True,
     mm_plugin=get_mm_plugin(
-        name="qwen2_omni", image_token="<|image_pad|>", video_token="<|video_pad|>", audio_token="<|audio_pad|>"
+        name="qwen2_omni",
+        image_token="<|image_pad|>",
+        video_token="<|video_pad|>",
+        audio_token="<|audio_pad|>",
     ),
 )
 
@@ -1934,35 +2379,55 @@ register_template(
 # copied from qwen template
 register_template(
     name="qwen2_vl",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     default_system="You are a helpful assistant.",
     stop_words=["<|im_end|>"],
     replace_eos=True,
-    mm_plugin=get_mm_plugin(name="qwen2_vl", image_token="<|image_pad|>", video_token="<|video_pad|>"),
+    mm_plugin=get_mm_plugin(
+        name="qwen2_vl", image_token="<|image_pad|>", video_token="<|video_pad|>"
+    ),
 )
 
 
 # copied from qwen template
 register_template(
     name="qwen3_vl",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     stop_words=["<|im_end|>"],
     replace_eos=True,
-    mm_plugin=get_mm_plugin(name="qwen3_vl", image_token="<|image_pad|>", video_token="<|video_pad|>"),
+    mm_plugin=get_mm_plugin(
+        name="qwen3_vl", image_token="<|image_pad|>", video_token="<|video_pad|>"
+    ),
     template_class=ReasoningTemplate,
 )
 
@@ -1970,25 +2435,39 @@ register_template(
 # copied from qwen template
 register_template(
     name="qwen3_vl_nothink",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|im_end|>\n"], tool_format="qwen"),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|im_end|>\n"], tool_format="qwen"
+    ),
     format_observation=StringFormatter(
-        slots=["<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"]
+        slots=[
+            "<|im_start|>user\n<tool_response>\n{{content}}\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+        ]
     ),
     format_tools=ToolFormatter(tool_format="qwen"),
     stop_words=["<|im_end|>"],
     replace_eos=True,
-    mm_plugin=get_mm_plugin(name="qwen3_vl", image_token="<|image_pad|>", video_token="<|video_pad|>"),
+    mm_plugin=get_mm_plugin(
+        name="qwen3_vl", image_token="<|image_pad|>", video_token="<|video_pad|>"
+    ),
 )
 
 
 register_template(
     name="sailor",
-    format_user=StringFormatter(slots=["<|im_start|>question\n{{content}}<|im_end|>\n<|im_start|>answer\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>question\n{{content}}<|im_end|>\n<|im_start|>answer\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     default_system=(
         "You are an AI assistant named Sailor created by Sea AI Lab. "
         "Your answer should be friendly, unbiased, faithful, informative and detailed."
@@ -2000,9 +2479,17 @@ register_template(
 register_template(
     name="seed_coder",
     format_user=StringFormatter(
-        slots=[{"bos_token"}, "user\n{{content}}", {"eos_token"}, {"bos_token"}, "assistant\n"]
+        slots=[
+            {"bos_token"},
+            "user\n{{content}}",
+            {"eos_token"},
+            {"bos_token"},
+            "assistant\n",
+        ]
     ),
-    format_system=StringFormatter(slots=[{"bos_token"}, "system\n{{content}}", {"eos_token"}]),
+    format_system=StringFormatter(
+        slots=[{"bos_token"}, "system\n{{content}}", {"eos_token"}]
+    ),
     default_system=(
         "You are an AI programming assistant, utilizing the Seed-Coder model, developed by ByteDance Seed, "
         "and you only answer questions related to computer science. For politically sensitive questions, "
@@ -2015,10 +2502,20 @@ register_template(
 register_template(
     name="seed_oss",
     format_user=StringFormatter(
-        slots=[{"bos_token"}, "user\n{{content}}", {"eos_token"}, {"bos_token"}, "assistant\n"]
+        slots=[
+            {"bos_token"},
+            "user\n{{content}}",
+            {"eos_token"},
+            {"bos_token"},
+            "assistant\n",
+        ]
     ),
-    format_system=StringFormatter(slots=[{"bos_token"}, "system\n{{content}}", {"eos_token"}]),
-    format_function=FunctionFormatter(slots=[{"bos_token"}, "\n{{content}}", {"eos_token"}], tool_format="seed_oss"),
+    format_system=StringFormatter(
+        slots=[{"bos_token"}, "system\n{{content}}", {"eos_token"}]
+    ),
+    format_function=FunctionFormatter(
+        slots=[{"bos_token"}, "\n{{content}}", {"eos_token"}], tool_format="seed_oss"
+    ),
     format_tools=ToolFormatter(tool_format="seed_oss"),
     template_class=ReasoningTemplate,
     thought_words=("<seed:think>", "</seed:think>"),
@@ -2037,8 +2534,12 @@ register_template(
         ]
     ),
     format_assistant=StringFormatter(slots=["{{content}}<|eot_id|>"]),
-    format_system=StringFormatter(slots=["<|start_header_id|>system<|end_header_id|>\n\n{{content}}<|eot_id|>"]),
-    format_function=FunctionFormatter(slots=["{{content}}<|eot_id|>"], tool_format="llama3"),
+    format_system=StringFormatter(
+        slots=["<|start_header_id|>system<|end_header_id|>\n\n{{content}}<|eot_id|>"]
+    ),
+    format_function=FunctionFormatter(
+        slots=["{{content}}<|eot_id|>"], tool_format="llama3"
+    ),
     format_observation=StringFormatter(
         slots=[
             (
@@ -2062,18 +2563,26 @@ register_template(
 
 register_template(
     name="smollm",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     stop_words=["<|im_end|>"],
 )
 
 
 register_template(
     name="smollm2",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     stop_words=["<|im_end|>"],
     default_system="You are a helpful AI assistant named SmolLM, trained by Hugging Face.",
 )
@@ -2131,7 +2640,9 @@ register_template(
         "A chat between a curious user and an artificial intelligence assistant. "
         "The assistant gives helpful, detailed, and polite answers to the user's questions."
     ),
-    mm_plugin=get_mm_plugin(name="video_llava", image_token="<image>", video_token="<video>"),
+    mm_plugin=get_mm_plugin(
+        name="video_llava", image_token="<image>", video_token="<video>"
+    ),
 )
 
 
@@ -2154,9 +2665,13 @@ register_template(
 
 register_template(
     name="yayi",
-    format_user=StringFormatter(slots=[{"token": "<|Human|>"}, ":\n{{content}}\n\n", {"token": "<|YaYi|>"}, ":"]),
+    format_user=StringFormatter(
+        slots=[{"token": "<|Human|>"}, ":\n{{content}}\n\n", {"token": "<|YaYi|>"}, ":"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}\n\n"]),
-    format_system=StringFormatter(slots=[{"token": "<|System|>"}, ":\n{{content}}\n\n"]),
+    format_system=StringFormatter(
+        slots=[{"token": "<|System|>"}, ":\n{{content}}\n\n"]
+    ),
     default_system=(
         "You are a helpful, respectful and honest assistant named YaYi "
         "developed by Beijing Wenge Technology Co.,Ltd. "
@@ -2175,9 +2690,13 @@ register_template(
 # copied from chatml template
 register_template(
     name="yi",
-    format_user=StringFormatter(slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]),
+    format_user=StringFormatter(
+        slots=["<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n"]
+    ),
     format_assistant=StringFormatter(slots=["{{content}}<|im_end|>\n"]),
-    format_system=StringFormatter(slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]),
+    format_system=StringFormatter(
+        slots=["<|im_start|>system\n{{content}}<|im_end|>\n"]
+    ),
     stop_words=["<|im_end|>"],
 )
 
@@ -2209,7 +2728,9 @@ register_template(
 
 register_template(
     name="zephyr",
-    format_user=StringFormatter(slots=["<|user|>\n{{content}}", {"eos_token"}, "<|assistant|>\n"]),
+    format_user=StringFormatter(
+        slots=["<|user|>\n{{content}}", {"eos_token"}, "<|assistant|>\n"]
+    ),
     format_system=StringFormatter(slots=["<|system|>\n{{content}}", {"eos_token"}]),
     default_system="You are Zephyr, a helpful assistant.",
 )
